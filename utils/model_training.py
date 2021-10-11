@@ -16,9 +16,14 @@ class ModelTraining:
 			"""Train."""
 			print(f'    {info}')
 			model = get_model_fn()
-			dense_log = model.fit(x_train, y_train, epochs=self.epochs, batch_size=self.batch_size, verbose=True)
-			results = model.evaluate(x_test, y_test, batch_size=self.batch_size)
-			print(results)
+			epochs_test_eval_loss, epochs_test_eval_score = [], []
+			for i in range(self.epochs):
+				train_results = model.fit(x_train, y_train, epochs=1, batch_size=self.batch_size, verbose=True)
+				eval_loss, eval_score = model.evaluate(x_test, y_test, batch_size=self.batch_size)
+				epochs_test_eval_loss.append(eval_loss)
+				epochs_test_eval_score.append(eval_score)
+			eval_results = {"loss": epochs_test_eval_loss, "score":epochs_test_eval_score}
+			return eval_results
 
 
 	class FederatedTraining:
@@ -27,10 +32,11 @@ class ModelTraining:
 		INITIALIZATION_STATE_BURNIN_SINGLETON = "burnin_singleton"
 		INITIALIZATION_STATE_BURNIN_MEAN_CONSENSUS = "burnin_mean_consensus"
 		INITIALIZATION_STATE_BURNIN_SCALED_CONSENSUS = "burnin_scaled_consensus"
+		INITIALIZATION_STATE_ROUND_ROBIN = "round_robin"
 
 		def __init__(self, learners_num=100, rounds_num=100, participation_rate=1, local_epochs=4, batch_size=100,
 					 learners_scaling_factors=list(), initialization_state=INITIALIZATION_STATE_RANDOM,
-					 burnin_period_epochs=0):
+					 burnin_period_epochs=0, round_robin_period_epochs=0):
 			self.learners_num = learners_num
 			self.rounds_num = rounds_num
 			self.participation_rate = participation_rate
@@ -41,6 +47,7 @@ class ModelTraining:
 			print("Federated Environment Specs - Learners {}, Rounds: {}, Local Epochs: {}, Federated Initialization: {}"
 				  .format(self.learners_num, self.rounds_num, self.local_epochs, self.initialization_state))
 			self.burnin_period_epochs = burnin_period_epochs
+			self.round_robin_period_epochs = round_robin_period_epochs
 			self.execution_stats = self.construct_init_execution_stats()
 
 
@@ -53,7 +60,8 @@ class ModelTraining:
 					"local_epochs_per_client" : self.local_epochs,
 					"batch_size_per_client" : self.batch_size,
 					"federated_model_initialization_state" : self.initialization_state,
-					"burnin_period_epochs" : self.burnin_period_epochs
+					"burnin_period_epochs" : self.burnin_period_epochs,
+					"round_robin_period_epochs": self.round_robin_period_epochs
 				},
 				"federated_execution_results" : list()
 			}
@@ -105,7 +113,28 @@ class ModelTraining:
 					init_state.append(mean_weight)
 				model_state = init_state
 
+			elif self.initialization_state == self.INITIALIZATION_STATE_ROUND_ROBIN:
+				random_models_idx = self.generate_random_participating_learners()
+				model_state = lmodels[0].get_weights()
+				for lidx, lmodel in enumerate(lmodels):
+					# We perform the round-robin initialization based on the participation rate.
+					# If the rate is 1, then consider all learners during the initialization step, else
+					# we loop over a pool of learners (sample).
+					if lidx in random_models_idx:
+						lmodel.set_weights(model_state)
+						lmodel.fit(x_train_chunks[lidx], y_train_chunks[lidx],
+							epochs=self.round_robin_period_epochs, batch_size=self.batch_size, verbose=False
+						)
+						model_state = lmodel.get_weights()
+
 			return model_state
+
+
+		def generate_random_participating_learners(self):
+			random_models_idx = random.sample([x for x in range(self.learners_num)],
+											  k=int(self.participation_rate * self.learners_num))
+			return random_models_idx
+
 
 
 		def start(self, get_model_fn, x_train_chunks, y_train_chunks, x_test, y_test, info="Some Feedback"):
@@ -150,8 +179,7 @@ class ModelTraining:
 				for model in lmodels:
 					model.set_weights(global_weights)
 
-				random_models_idx = random.sample([x for x in range(self.learners_num)],
-												  k=int(self.participation_rate * self.learners_num))
+				random_models_idx = self.generate_random_participating_learners()
 				mixed_models = [lmodels[idx] for idx in random_models_idx]
 				print("Total Local Models: ", len(mixed_models))
 

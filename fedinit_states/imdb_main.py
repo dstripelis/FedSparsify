@@ -1,6 +1,6 @@
-from fedinit_states.models.model import FedModel
-from fedinit_states.models.imdb_lstm import IMDB_LSTM
-from fedinit_states.utils.model_training import ModelTraining
+from simulatedFL.models.model import Model
+from simulatedFL.models.imdb_lstm import IMDB_LSTM
+from simulatedFL.utils.model_training import ModelTraining
 from tensorflow.keras import preprocessing
 
 import os
@@ -19,7 +19,7 @@ if __name__ == "__main__":
 	"""Model Definition."""
 	max_features = 25000  # Only consider the top X words
 	maxlen = 200  # Only consider the first X words of each movie review
-	model = IMDB_LSTM(kernel_initializer=FedModel.KERAS_INITIALIZER_GLOROT_UNIFORM, max_features=max_features).get_model
+	model = IMDB_LSTM(kernel_initializer=Model.KERAS_INITIALIZER_GLOROT_UNIFORM, max_features=max_features).get_model
 	model().summary()
 
 	"""Load the data."""

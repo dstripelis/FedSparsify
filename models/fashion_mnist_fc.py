@@ -1,11 +1,11 @@
 import tensorflow as tf
 
-from fedinit_states.models.model import FedModel
+from simulatedFL.models.model import Model
 
 
-class FashionMnistModel(FedModel):
+class FashionMnistModel(Model):
 
-	def __init__(self, kernel_initializer=FedModel.KERAS_INITIALIZER_GLOROT_UNIFORM, learning_rate=0.02,
+	def __init__(self, kernel_initializer=Model.KERAS_INITIALIZER_GLOROT_UNIFORM, learning_rate=0.02,
 				 metrics=["accuracy"]):
 		super().__init__(kernel_initializer, learning_rate, metrics)
 

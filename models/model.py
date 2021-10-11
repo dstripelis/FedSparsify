@@ -1,6 +1,6 @@
 import abc
 
-class FedModel:
+class Model:
 
 	KERAS_INITIALIZER_RANDOM_NORMAL = "random_normal"
 	KERAS_INITIALIZER_RANDOM_UNIFORM = "random_uniform"

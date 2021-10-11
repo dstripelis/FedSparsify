@@ -1,12 +1,12 @@
 import tensorflow as tf
 
 from tensorflow.keras import layers, models
-from fedinit_states.models.model import FedModel
+from simulatedFL.models.model import Model
 
 
-class Cifar10CNN(FedModel):
+class Cifar10CNN(Model):
 
-	def __init__(self, kernel_initializer=FedModel.KERAS_INITIALIZER_GLOROT_UNIFORM, learning_rate=0.01,
+	def __init__(self, kernel_initializer=Model.KERAS_INITIALIZER_GLOROT_UNIFORM, learning_rate=0.01,
 				 metrics=["accuracy"]):
 		super().__init__(kernel_initializer, learning_rate, metrics)
 
