@@ -19,7 +19,7 @@ if __name__ == "__main__":
 	"""Model Definition."""
 	max_features = 25000  # Only consider the top X words
 	maxlen = 200  # Only consider the first X words of each movie review
-	model = IMDB_LSTM(kernel_initializer=Model.KERAS_INITIALIZER_GLOROT_UNIFORM, max_features=max_features).get_model
+	model = IMDB_LSTM(kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, max_features=max_features).get_model
 	model().summary()
 
 	"""Load the data."""
@@ -31,17 +31,21 @@ if __name__ == "__main__":
 	rounds_num = 500
 	learners_num_list = [10, 100, 1000]
 	participation_rates_list = [1, 0.5, 0.1]
-	initialization_states_list = [ModelTraining.FederatedTraining.INITIALIZATION_STATE_RANDOM,
-								  ModelTraining.FederatedTraining.INITIALIZATION_STATE_BURNIN_MEAN_CONSENSUS,
-								  ModelTraining.FederatedTraining.INITIALIZATION_STATE_BURNIN_SINGLETON]
+	initialization_states_list = [Model.InitializationStates.RANDOM,
+								  Model.InitializationStates.BURNIN_MEAN_CONSENSUS,
+								  Model.InitializationStates.BURNIN_SINGLETON,
+								  Model.InitializationStates.ROUND_ROBIN]
 	for learners_num in learners_num_list:
 		for participation_rate in participation_rates_list:
 			for initialization_state in initialization_states_list:
 
 				burnin_period = 0
-				if initialization_state == ModelTraining.FederatedTraining.INITIALIZATION_STATE_BURNIN_SINGLETON \
-						or initialization_state == ModelTraining.FederatedTraining.INITIALIZATION_STATE_BURNIN_MEAN_CONSENSUS:
+				burnin_period_round_robin = 0
+				if initialization_state == Model.InitializationStates.BURNIN_SINGLETON \
+						or initialization_state == Model.InitializationStates.BURNIN_MEAN_CONSENSUS:
 					burnin_period = 50
+				if initialization_state == Model.InitializationStates.ROUND_ROBIN:
+					burnin_period_round_robin = 1
 
 				federated_training = ModelTraining.FederatedTraining(learners_num=learners_num,
 																	 rounds_num=rounds_num,

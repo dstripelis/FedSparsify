@@ -5,7 +5,7 @@ from simulatedFL.models.model import Model
 
 class FashionMnistModel(Model):
 
-	def __init__(self, kernel_initializer=Model.KERAS_INITIALIZER_GLOROT_UNIFORM, learning_rate=0.02,
+	def __init__(self, kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, learning_rate=0.02,
 				 metrics=["accuracy"]):
 		super().__init__(kernel_initializer, learning_rate, metrics)
 

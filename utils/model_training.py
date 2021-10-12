@@ -4,6 +4,10 @@ import time
 import numpy as np
 import tensorflow as tf
 
+from simulatedFL.models.model import Model
+from simulatedFL.utils.model_merge import MergeOps
+
+
 class ModelTraining:
 
 	class CentralizedTraining:
@@ -28,30 +32,27 @@ class ModelTraining:
 
 	class FederatedTraining:
 
-		INITIALIZATION_STATE_RANDOM = "random"
-		INITIALIZATION_STATE_BURNIN_SINGLETON = "burnin_singleton"
-		INITIALIZATION_STATE_BURNIN_MEAN_CONSENSUS = "burnin_mean_consensus"
-		INITIALIZATION_STATE_BURNIN_SCALED_CONSENSUS = "burnin_scaled_consensus"
-		INITIALIZATION_STATE_ROUND_ROBIN = "round_robin"
-
 		def __init__(self, learners_num=100, rounds_num=100, participation_rate=1, local_epochs=4, batch_size=100,
-					 learners_scaling_factors=list(), initialization_state=INITIALIZATION_STATE_RANDOM,
+					 learners_scaling_factors=list(), initialization_state=Model.InitializationStates.RANDOM,
 					 burnin_period_epochs=0, round_robin_period_epochs=0):
 			self.learners_num = learners_num
 			self.rounds_num = rounds_num
 			self.participation_rate = participation_rate
 			self.local_epochs = local_epochs
 			self.batch_size = batch_size
-			self.learners_scaling_factors = learners_scaling_factors
+
+			if len(learners_scaling_factors) == 0:
+				self.learners_scaling_factors = [1] * learners_num
+			else:
+				self.learners_scaling_factors = learners_scaling_factors
+
 			self.initialization_state = initialization_state
-			print("Federated Environment Specs - Learners {}, Rounds: {}, Local Epochs: {}, Federated Initialization: {}"
-				  .format(self.learners_num, self.rounds_num, self.local_epochs, self.initialization_state))
 			self.burnin_period_epochs = burnin_period_epochs
 			self.round_robin_period_epochs = round_robin_period_epochs
-			self.execution_stats = self.construct_init_execution_stats()
+			self.execution_stats = self.construct_federated_execution_stats()
 
 
-		def construct_init_execution_stats(self):
+		def construct_federated_execution_stats(self):
 			res = {
 				"federated_environment" : {
 					"number_of_learners" : self.learners_num,
@@ -68,21 +69,21 @@ class ModelTraining:
 			return res
 
 
-		def initial_model_state(self, gmodel, lmodels, x_train_chunks, y_train_chunks):
+		def set_initial_model_state(self, gmodel, lmodels, x_train_chunks, y_train_chunks):
 
 			model_state = []
-			if self.initialization_state == self.INITIALIZATION_STATE_RANDOM:
+			if self.initialization_state == Model.InitializationStates.RANDOM:
 				# Random Initialization - Assign the random state to every learner - see final loop at the end.
 				model_state = gmodel.get_weights()
 
-			elif self.initialization_state == self.INITIALIZATION_STATE_BURNIN_SINGLETON:
+			elif self.initialization_state == Model.InitializationStates.BURNIN_SINGLETON:
 				# Burnin Initialization - 'Burn' a single learner and assign its weight - see final loop at the end.
 				lmodels[0].fit(x_train_chunks[0], y_train_chunks[0],
 					epochs=self.burnin_period_epochs, batch_size=self.batch_size, verbose=False
 				)
 				model_state = lmodels[0].get_weights()
 
-			elif self.initialization_state == self.INITIALIZATION_STATE_BURNIN_MEAN_CONSENSUS:
+			elif self.initialization_state == Model.InitializationStates.BURNIN_MEAN_CONSENSUS:
 				# Burnin Initialization - 'Burn' all learners - average them and assign their weight - see final loop at the end.
 				for lidx, lmodel in enumerate(lmodels):
 					lmodels[lidx].fit(x_train_chunks[lidx], y_train_chunks[lidx],
@@ -97,7 +98,7 @@ class ModelTraining:
 					init_state.append(mean_weight)
 				model_state = init_state
 
-			elif self.initialization_state == self.INITIALIZATION_STATE_BURNIN_SCALED_CONSENSUS:
+			elif self.initialization_state == Model.InitializationStates.BURNIN_SCALED_CONSENSUS:
 				# Burnin Initialization - 'Burn' all learners and scale them - see final loop at the end.
 				for lidx, lmodel in enumerate(lmodels):
 					lmodel.fit(x_train_chunks[lidx], y_train_chunks[lidx],
@@ -113,7 +114,7 @@ class ModelTraining:
 					init_state.append(mean_weight)
 				model_state = init_state
 
-			elif self.initialization_state == self.INITIALIZATION_STATE_ROUND_ROBIN:
+			elif self.initialization_state == Model.InitializationStates.ROUND_ROBIN:
 				random_models_idx = self.generate_random_participating_learners()
 				model_state = lmodels[0].get_weights()
 				for lidx, lmodel in enumerate(lmodels):
@@ -136,6 +137,14 @@ class ModelTraining:
 			return random_models_idx
 
 
+		def train_local_models(self, lmodels, x_train_chunks, y_train_chunks):
+			for lidx, lmodel in enumerate(lmodels):
+				lmodel.fit(
+					x_train_chunks[lidx], y_train_chunks[lidx],
+					epochs=self.local_epochs, batch_size=self.batch_size, verbose=False
+				)
+			return lmodels
+
 
 		def start(self, get_model_fn, x_train_chunks, y_train_chunks, x_test, y_test, info="Some Feedback"):
 			"""Federated Training."""
@@ -145,19 +154,9 @@ class ModelTraining:
 			print(f'    {info}')
 
 			federation_rounds_stats = []
-
 			st = time.process_time()
-			global_weights = self.initial_model_state(gmodel, lmodels, x_train_chunks, y_train_chunks)
+			global_weights = self.set_initial_model_state(gmodel, lmodels, x_train_chunks, y_train_chunks)
 
-			if len(self.learners_scaling_factors) == 0:
-				norm_factor = self.learners_num
-				norm_learners_scaling_factors = [np.divide(1, norm_factor) for _ in range(self.learners_num)]
-			else:
-				norm_factor = sum(self.learners_scaling_factors)
-				norm_learners_scaling_factors = [np.divide(factor, norm_factor) for factor in
-												 self.learners_scaling_factors]
-
-			num_weights = len(gmodel.get_weights())
 			for r in range(self.rounds_num + 1):
 
 				# set global model weights
@@ -168,37 +167,28 @@ class ModelTraining:
 				# capture end time
 				et = time.process_time()
 
-				# TODO get the mean elapsed time, i.e., parallel execution!!
+				# raw elapsed time
 				elapsed_time = et - st
-				federation_rounds_stats.append((elapsed_time, loss, score))
+				# avg elapsed time -- assuming every learner was running in parallel
+				avg_elapsed_time = np.divide(elapsed_time, len(lmodels))
+				federation_rounds_stats.append((avg_elapsed_time, loss, score))
 				print("Federation Round: {}, Loss: {}, Score: {}".format(r, loss, score))
 
 				# initialize execution time
 				st = time.process_time()
-				# propagate
+				# set all local models to global model state
 				for model in lmodels:
 					model.set_weights(global_weights)
 
+				# randomly select local models
 				random_models_idx = self.generate_random_participating_learners()
-				mixed_models = [lmodels[idx] for idx in random_models_idx]
-				print("Total Local Models: ", len(mixed_models))
-
-				# train local models
-				for lidx, lmodel in enumerate(mixed_models):
-					if lidx in random_models_idx:
-						lmodel.fit(
-							x_train_chunks[lidx], y_train_chunks[lidx],
-							epochs=self.local_epochs, batch_size=self.batch_size, verbose=False
-						)
-
-				# aggregate local models
-				global_weights = []
-				for j in range(num_weights):
-					normalized_weights = [norm_learners_scaling_factors[model_idx] * model.get_weights()[j]
-										  for model_idx, model in enumerate(lmodels)]
-					normalized_weights_np = np.array(normalized_weights)
-					mean_weight = normalized_weights_np.sum(axis=0)
-					global_weights.append(mean_weight)
+				models_subset = [lmodels[idx] for idx in random_models_idx]
+				x_train_chunks_subset = [x_train_chunks[idx] for idx in random_models_idx]
+				y_train_chunks_subset = [y_train_chunks[idx] for idx in random_models_idx]
+				scaling_factors_subset = [self.learners_scaling_factors[idx] for idx in random_models_idx]
+				models_subset = self.train_local_models(models_subset, x_train_chunks_subset, y_train_chunks_subset)
+				print("Total Local Models: ", len(models_subset))
+				global_weights = MergeOps.merge_local_models(models_subset, scaling_factors_subset)
 
 			# Clear memory
 			del lmodels

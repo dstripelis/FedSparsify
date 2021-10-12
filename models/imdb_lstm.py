@@ -6,7 +6,7 @@ from simulatedFL.models.model import Model
 
 class IMDB_LSTM(Model):
 
-	def __init__(self, kernel_initializer=Model.KERAS_INITIALIZER_GLOROT_UNIFORM, max_features=25000,
+	def __init__(self, kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, max_features=25000,
 				 learning_rate=0.01, metrics=["accuracy"]):
 		self.max_features = max_features  # Only consider the top X words
 		super().__init__(kernel_initializer, learning_rate, metrics)
