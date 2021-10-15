@@ -201,15 +201,17 @@ if __name__ == "__main__":
 	# burnin_init_dir = "IMDB/iid/rounds500"
 
 	files = []
-	files = glob.glob("../logs/{}/*init_random*.json".format(random_init_dir))
+	files = glob.glob("../logs/FashionMNIST/*.json")
+	print(len(files))
+	# files = glob.glob("../logs/{}/*init_random*.json".format(random_init_dir))
 	# files.extend(glob.glob("../logs/{}/*singleton*burnin_5.json".format(burnin_init_dir)))
 	# files.extend(glob.glob("../logs/FashionMNIST/iid/rounds1000/*singleton*burnin_5.json".format(burnin_init_dir)))
 	# files.extend(glob.glob("../logs/{}/*singleton*burnin_10.json".format(burnin_init_dir)))
 	# files.extend(glob.glob("../logs/{}/*singleton*burnin_25.json".format(burnin_init_dir)))
 	# files.extend(glob.glob("../logs/{}/*singleton*burnin_50.json".format(burnin_init_dir)))
-	files.extend(glob.glob("../logs/{}/*init_burnin_mean_consensus*.json".format(burnin_init_dir)))
-	files.extend(glob.glob("../logs/{}/*init_burnin_singleton*.json".format(burnin_init_dir)))
-	files.extend(glob.glob("../logs/{}/*init_round_robin*.json".format(burnin_init_dir)))
+	# files.extend(glob.glob("../logs/{}/*init_burnin_mean_consensus*.json".format(burnin_init_dir)))
+	# files.extend(glob.glob("../logs/{}/*init_burnin_singleton*.json".format(burnin_init_dir)))
+	# files.extend(glob.glob("../logs/{}/*init_round_robin*.json".format(burnin_init_dir)))
 
 	learners_stats = dict()
 	learners_stats_burnin = dict()

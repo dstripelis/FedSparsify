@@ -27,14 +27,14 @@ if __name__ == "__main__":
 	x_train = preprocessing.sequence.pad_sequences(x_train, maxlen=maxlen)
 	x_test = preprocessing.sequence.pad_sequences(x_test, maxlen=maxlen)
 
-	output_filename_template = "fedinit_states/logs/IMDB/IMDB.rounds_{}.learners_{}.participation_{}.init_{}.burnin_{}.json"
+	output_filename_template = "simulatedFL/logs/IMDB/IMDB.rounds_{}.learners_{}.participation_{}.init_{}.burnin_{}.json"
 	rounds_num = 500
 	learners_num_list = [10, 100, 1000]
 	participation_rates_list = [1, 0.5, 0.1]
 	initialization_states_list = [Model.InitializationStates.RANDOM,
 								  Model.InitializationStates.BURNIN_MEAN_CONSENSUS,
 								  Model.InitializationStates.BURNIN_SINGLETON,
-								  Model.InitializationStates.ROUND_ROBIN]
+								  Model.InitializationStates.ROUND_ROBIN_RATE_SAMPLE]
 	for learners_num in learners_num_list:
 		for participation_rate in participation_rates_list:
 			for initialization_state in initialization_states_list:
@@ -44,7 +44,7 @@ if __name__ == "__main__":
 				if initialization_state == Model.InitializationStates.BURNIN_SINGLETON \
 						or initialization_state == Model.InitializationStates.BURNIN_MEAN_CONSENSUS:
 					burnin_period = 50
-				if initialization_state == Model.InitializationStates.ROUND_ROBIN:
+				if initialization_state == Model.InitializationStates.ROUND_ROBIN_RATE_SAMPLE:
 					burnin_period_round_robin = 1
 
 				federated_training = ModelTraining.FederatedTraining(learners_num=learners_num,
@@ -69,12 +69,12 @@ if __name__ == "__main__":
 				for i in range(learners_num):
 					x_chunk.append(x_train[idx[i * chunk_size:(i + 1) * chunk_size]])
 					y_chunk.append(y_train[idx[i * chunk_size:(i + 1) * chunk_size]])
-				x_chunk = np.array(x_chunk)
-				y_chunk = np.array(y_chunk)
-				print(f'Chunk size {chunk_size}', x_chunk.shape, y_chunk.shape)
+				x_chunks = np.array(x_chunk)
+				y_chunks = np.array(y_chunk)
+				print(f'Chunk size {chunk_size}', x_chunks.shape, y_chunks.shape)
 
-				federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunk,
-																	  y_train_chunks=y_chunk, x_test=x_test,
+				federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunks,
+																	  y_train_chunks=y_chunks, x_test=x_test,
 																	  y_test=y_test, info="IMDB")
 				print(federated_training.execution_stats)
 
