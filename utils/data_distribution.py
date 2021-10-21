@@ -1,6 +1,7 @@
 import random
 
 import numpy as np
+from simulatedFL.utils.logger import CustomLogger
 
 
 class PartitioningScheme(object):
@@ -9,6 +10,10 @@ class PartitioningScheme(object):
 		self.partitions_num = partitions_num
 		self.x_train = x_train
 		self.y_train = y_train
+		self.iid = False
+		self.non_iid = False
+		self.classes_per_client = 0
+		self.examples_per_client = []
 
 	def iid_partition(self):
 		idx = list(range(len(self.x_train)))
@@ -23,7 +28,13 @@ class PartitioningScheme(object):
 			y_chunk.append(y_train_randomized[idx[i * chunk_size:(i + 1) * chunk_size]])
 		x_chunk = np.array(x_chunk)
 		y_chunk = np.array(y_chunk)
-		print(f'Chunk size {chunk_size}', x_chunk.shape, y_chunk.shape)
+		CustomLogger.info("Chunk size {}, {}".format(x_chunk.shape, y_chunk.shape))
+
+		# set partition object specifications
+		self.iid = True
+		self.classes_per_client = np.unique(y_chunk).size
+		self.examples_per_client = [y_c.size for y_c in y_chunk]
+
 		return x_chunk, y_chunk
 
 
@@ -67,12 +78,17 @@ class PartitioningScheme(object):
 
 		x_chunk = np.array(x_chunks_all_clients)
 		y_chunk = np.array(y_chunks_all_clients)
-		print("Chunk size {}. X-attribute shape: {}, Y-attribute shape: {}".format(
+		CustomLogger.info("Chunk size {}. X-attribute shape: {}, Y-attribute shape: {}".format(
 			chunk_size, x_chunk.shape, y_chunk.shape))
 		remaining = len(y_chunks)
-		print("Remaining unassigned data points:", len(y_chunks))
+		CustomLogger.info("Remaining unassigned data points: {}".format(len(y_chunks)))
 		if remaining > 0:
 			raise RuntimeError("Not all training data have been assigned.")
+
+		# set partition object specifications
+		self.non_iid = True
+		self.classes_per_client = classes_per_partition
+		self.examples_per_client = [y_c.size for y_c in y_chunk]
 
 		return x_chunk, y_chunk
 
@@ -80,9 +96,17 @@ class PartitioningScheme(object):
 	def dirichlet_based_partition(self, a):
 		pass
 
+
+	def to_json_representation(self):
+		return {'iid': self.iid,
+				'non_iid': self.non_iid,
+				'classes_per_client': self.classes_per_client,
+				'examples_per_client': self.examples_per_client}
+
 # if __name__ == "__main__":
 # 	import tensorflow as tf
 # 	(x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
 # 	pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=100)
 # 	x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=5)
+# 	print(pscheme.to_json_representation())
 

@@ -25,7 +25,7 @@ class MergeWeightedAverage(MergeOps):
 	def __init__(self, scaling_factors):
 		super(MergeWeightedAverage, self).__init__(scaling_factors=scaling_factors)
 
-	def __call__(self, models):
+	def __call__(self, models, model_masks=None):
 		num_weights = len(models[0].get_weights())
 		scaled_weights = []
 		norm_learners_scaling_factors = self.scaling_factors_normalized()

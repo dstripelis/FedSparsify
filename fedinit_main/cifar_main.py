@@ -1,5 +1,5 @@
 from simulatedFL.models.model import Model
-from simulatedFL.models.cifar10_cnn import Cifar10CNN
+from simulatedFL.models.cifar_cnn import CifarCNN
 from simulatedFL.utils.model_training import ModelTraining
 from simulatedFL.models.model import Model
 
@@ -17,7 +17,7 @@ tf.random.set_seed(1990)
 if __name__ == "__main__":
 
 	"""Model Definition."""
-	model = Cifar10CNN(kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM).get_model
+	model = CifarCNN(kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM).get_model
 	model().summary()
 
 	"""Load the data."""

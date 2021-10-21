@@ -4,7 +4,7 @@ from tensorflow.keras import layers, models, regularizers
 from simulatedFL.models.model import Model
 
 
-class Cifar10CNN(Model):
+class CifarCNN(Model):
 
 	def __init__(self, kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, learning_rate=0.005,
 				 metrics=["accuracy"]):

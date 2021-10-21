@@ -3,11 +3,13 @@ import tensorflow as tf
 from simulatedFL.models.model import Model
 
 
-class Cifar10CNN(Model):
+class CifarResNet50(Model):
 
 	def __init__(self, kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, learning_rate=0.01,
-				 metrics=["accuracy"]):
+				 momentum=0.9, metrics=["accuracy"], classes_num=100):
 		super().__init__(kernel_initializer, learning_rate, metrics)
+		self.classes_num = classes_num
+		self.momentum = momentum
 
 
 	def get_model(self):
@@ -15,17 +17,16 @@ class Cifar10CNN(Model):
 		Prepare CNN model
 		:return:
 		"""
-		model = tf.keras.applications.ResNet50(
+		model = tf.keras.applications.ResNet50V2(
 			include_top=True,
 			weights=None,
 			input_tensor=None,
-			input_shape=None,
+			input_shape=(32, 32, 3),
 			pooling=None,
-			classes=100,
-			kernel_initializer=self.kernel_initializer
+			classes=self.classes_num
 		)
 
-		model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=self.learning_rate, momentum=0.0),
+		model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=self.learning_rate, momentum=self.momentum),
 					  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
 					  metrics=self.metrics)
 

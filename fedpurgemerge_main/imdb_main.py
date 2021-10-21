@@ -1,9 +1,10 @@
 from simulatedFL.models.model import Model
-from simulatedFL.models.fashion_mnist_fc import FashionMnistModel
+from simulatedFL.models.imdb_lstm import IMDB_LSTM
 from simulatedFL.utils.model_training import ModelTraining
 from simulatedFL.utils.data_distribution import PartitioningScheme
 from simulatedFL.utils.model_merge import MergeWeightedAverage
 from simulatedFL.utils.model_purge import PurgeByWeightMagnitude
+from tensorflow.keras import preprocessing
 
 import os
 import json
@@ -11,33 +12,36 @@ import random
 import numpy as np
 import tensorflow as tf
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+os.environ['CUDA_VISIBLE_DEVICES'] = "2"
 np.random.seed(1990)
 random.seed(1990)
 tf.random.set_seed(1990)
 
 if __name__ == "__main__":
 
-	""" Model Definition. """
-	model = FashionMnistModel(kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM).get_model
+	"""Model Definition."""
+	max_features = 25000  # Only consider the top X words
+	maxlen = 200  # Only consider the first X words of each movie review
+	model = IMDB_LSTM(kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM,
+					  max_features=max_features).get_model
 	model().summary()
 
-	""" Load the data. """
-	(x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
-	x_train = (x_train.astype('float32') / 256).reshape(-1, 28, 28, 1)
-	x_test = (x_test.astype('float32') / 256).reshape(-1, 28, 28, 1)
+	"""Load the data."""
+	(x_train, y_train), (x_test, y_test) = tf.keras.datasets.imdb.load_data(num_words=max_features)
+	x_train = preprocessing.sequence.pad_sequences(x_train, maxlen=maxlen)
+	x_test = preprocessing.sequence.pad_sequences(x_test, maxlen=maxlen)
 
-	output_logs_dir = os.path.dirname(__file__) + "/../logs/FashionMNIST/"
-	output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/FashionMNIST/"
-	experiment_template = "FashionMNIST.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.finetuning_{}"
+	output_logs_dir = os.path.dirname(__file__) + "/../logs/IMDB/"
+	output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/IMDB/"
+	experiment_template = "IMDB.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.finetuning_{}"
 
 	rounds_num = 300
 	learners_num_list = [10]
 	participation_rates_list = [1]
 	# participation_rates_list = [1, 0.5, 0.1]
-	sparsity_levels = [0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99]
+	sparsity_levels = [0.0, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99]
 	local_epochs = 4
-	fine_tuning_epochs = [1]
+	fine_tuning_epochs = [0]
 
 	for learners_num in learners_num_list:
 		for participation_rate in participation_rates_list:
@@ -54,8 +58,8 @@ if __name__ == "__main__":
 					output_arrays_dir = output_npzarrays_dir + filled_in_template
 
 					pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=learners_num)
-					# x_chunks, y_chunks = pscheme.iid_partition()
-					x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=2)
+					x_chunks, y_chunks = pscheme.iid_partition()
+					# x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=10)
 
 					scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 					merge_op = MergeWeightedAverage(scaling_factors)
@@ -75,7 +79,7 @@ if __name__ == "__main__":
 						pscheme.to_json_representation()
 					federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunks,
 																		  y_train_chunks=y_chunks, x_test=x_test,
-																		  y_test=y_test, info="Fashion-MNIST")
+																		  y_test=y_test, info="IMDB")
 
 					execution_output_filename = output_logs_dir + filled_in_template + ".json"
 					with open(execution_output_filename, "w+", encoding='utf-8') as fout:
