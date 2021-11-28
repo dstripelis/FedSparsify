@@ -10,7 +10,10 @@ from torch.utils.data import DataLoader
 
 from lib import os_utils
 from lib.data.datasets import get_dataset
-from lib.fedtrainer import FedController, LearnerMetaData
+from lib.fedtrainer import ControllerEvaluationStrategy, ControllerModelSavingStrategy, \
+    FedController, LearnerEvaluationStrategy, \
+    LearnerMetaData, \
+    LearnerModelSavingStrategy
 from lib.models.regression import Regression
 
 
@@ -116,7 +119,7 @@ def load_data(config):
         test_loader = DataLoader(
             data["test"], shuffle=False, batch_size=config.test.batch_size, num_workers=num_workers
             )
-    return train_loaders, valid_loaders, test_loader, metadata
+    return train_loaders, valid_loaders, test_loader, meta
 
 
 def load_model(config):
@@ -178,28 +181,40 @@ if __name__ == "__main__":
     # create learners
     optimizer_params = Box(
         {
-            "lr"          : config.train.lr, "optimizer": config.train.optimizer,
-            "weight_decay": config.train.weight_decay
+            "lr"             : config.train.lr,
+            "optimizer"      : config.train.optimizer,
+            "weight_decay"   : config.train.weight_decay,
+            "reset_optimizer": config.train.get("reset_optimizer", True)
             }
         )
+
     learners_metadata = []
     for idx, (m, t, v) in enumerate(zip(models, train_loaders, valid_loaders)):
-        LearnerMetaData(
-            m, optimizer_params, id=idx + 1, train_loader=t, valid_loader=v,
-            result_dir=f"{config.result_dir}/learner_{idx + 1}", log_every=config.train.log_every,
-            model_saving_strategy=config.train.learner_model_saving_strategy,
-            evaluation_strategy=config.train.learner_evaluation_strategy
+        learners_metadata.append(
+            LearnerMetaData(
+                m, optimizer_params, id=idx + 1, train_loader=t, valid_loader=v,
+                result_dir=f"{config.result_folder}/learner_{idx + 1}",
+                log_every=config.train.log_every,
+                model_saving_strategy=LearnerModelSavingStrategy(
+                    config.train.learner_model_saving_strategy
+                    ),
+                evaluation_strategy=LearnerEvaluationStrategy(
+                    config.train.learner_evaluation_strategy
+                    )
+                )
             )
 
     fed_trainer = FedController(
         learners=[i.create_learner() for i in learners_metadata],
         device=config.device,
         test_loader=test_loader,
-        result_dir=config.result_dir,
-        model_saving_strategy=config.train.community_model_saving_strategy,
-        evaluation_strategy=config.train.community_evaluation_strategy
+        result_dir=config.result_folder,
+        model_saving_strategy=ControllerModelSavingStrategy(
+            config.train.community_model_saving_strategy
+            ),
+        evaluation_strategy=ControllerEvaluationStrategy(config.train.community_evaluation_strategy)
         )
 
     fed_trainer.train(
-        num_rounds=config.train.num_rounds, epochs_per_round=config.train.epochs_per_rounds
+        num_rounds=config.train.num_rounds, epochs_per_round=config.train.epochs_per_round
         )

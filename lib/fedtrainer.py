@@ -1,8 +1,11 @@
 import copy
 import logging
+import math
 import typing
 from dataclasses import dataclass
 from enum import Enum
+from multiprocessing import Value
+from time import sleep
 
 import dill
 import numpy
@@ -141,9 +144,9 @@ class Learner:
         self.model_saving_strategy = model_saving_strategy
         self.evaluation_strategy = evaluation_strategy
 
-        os_utils.safe_makedirs(result_dir)
         # logging stuff
         if result_dir is not None:
+            os_utils.safe_makedirs(result_dir)
             self.summary_writer = SummaryWriter(log_dir=result_dir)
 
         self.train_loader = train_loader
@@ -189,8 +192,9 @@ class Learner:
         with torch.no_grad():
             for i, batch in enumerate(loader):
                 pred = self.model(batch)
-                loss, aux_loss = self.model.loss(pred, batch, reduce=True)
+                loss, aux_loss = self.model.loss(pred, batch, reduce=False)
 
+                losses.extend(loss.cpu().tolist())
                 # collect stats
                 if i == 0:
                     for k, v in aux_loss.items():
@@ -206,9 +210,10 @@ class Learner:
                         else:
                             aux_losses[k].extend(v.cpu().tolist())
 
-                return numpy.mean(losses), {k: numpy.mean(v) for (k, v) in aux_losses.items()}
+            return numpy.mean(losses), {k: numpy.mean(v) for (k, v) in aux_losses.items()}
 
     def on_train_begin(self, *, device, **kwargs):
+        logger.debug("In train begin")
         if self.optimizer_params is None:
             raise Exception("Cannot train without optimizer params")
 
@@ -218,6 +223,8 @@ class Learner:
         self.model.to(device)
 
     def on_train_end(self, *, epoch_offset, num_epochs, round, **kwargs):
+        logger.debug("In train end")
+
         if self.evaluation_strategy == LearnerEvaluationStrategy.EVERY_ROUND:
             if self.valid_loader:
                 loss, aux_loss = self.evaluate(self.valid_loader)
@@ -237,10 +244,12 @@ class Learner:
         # free the gpu
         self.model.to("cpu")
 
-    def on_epoch_begin(self, train_loader, valid_loader, **kwargs):
+    def on_epoch_begin(self, **kwargs):
+        logger.debug("In epoch begin")
         pass
 
     def on_epoch_end(self, *, epoch, **kwargs):
+        logger.debug("In epoch end")
         if self.evaluation_strategy == LearnerEvaluationStrategy.EVERY_EPOCH:
             if self.valid_loader:
                 loss, aux_loss = self.evaluate(self.valid_loader)
@@ -278,6 +287,7 @@ class FedController:
             model_saving_strategy=ControllerModelSavingStrategy.NEVER,
             evaluation_strategy=ControllerEvaluationStrategy.NEVER, ):
 
+        logger.debug(f"Created Federation Controller with {len(learners)}")
         self.result_dir = result_dir
         os_utils.safe_makedirs(result_dir)
 
@@ -293,8 +303,7 @@ class FedController:
 
         # create a handicapped learner instance for local evaluation
         self.community_evaluator = Learner(
-            copy.deepcopy(learners[0].model),
-            None, 0
+            copy.deepcopy(learners[0].model), None, 0
             )
         self.device = device
 
@@ -340,7 +349,7 @@ class FedController:
                     f"Round {round}: Finished Training learner {learner.id}"
                     )
 
-            logger.info(f"Finished of training learners in round {round}")
+            logger.info(f"Finished training learners in round {round}")
 
             logger.info("Computing community updates")
             community_params = self.combine_learners()
@@ -375,9 +384,12 @@ class FedController:
 
     # declare hook functions
     def on_train_begin(self, **kwargs):
+        logger.debug("Controller:In train begin")
         pass
 
     def on_train_end(self, *, num_rounds, **kwargs):
+        logger.debug("Controller:In train end")
+
         # save params
         if self.model_saving_strategy == ControllerModelSavingStrategy.END_OF_TRAINING:
             self.learners[0].save(
@@ -401,9 +413,13 @@ class FedController:
                     )
 
     def on_round_begin(self, **kwargs):
+        logger.debug("Controller:In round begin")
+
         pass
 
     def on_round_end(self, *, round, **kwargs):
+        logger.debug("Controller:In round end")
+
         # save params
         if self.model_saving_strategy == ControllerModelSavingStrategy.EVERY_ROUND:
             self.learners[0].save(
@@ -426,9 +442,13 @@ class FedController:
                     )
 
     def on_learner_train_begin(self, **kwargs):
+        logger.debug("Controller:In learner train begin")
+
         pass
 
     def on_learner_train_end(self, **kwargs):
+        logger.debug("Controller:In learner train end")
+
         pass
 
     def evaluate(self, loader, **kwargs):

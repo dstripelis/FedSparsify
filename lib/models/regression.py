@@ -1,6 +1,6 @@
 import torch
 
-from base_model import BaseModel
+from lib.models.base_model import BaseModel
 
 
 class Regression(BaseModel):
