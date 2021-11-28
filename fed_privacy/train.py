@@ -13,7 +13,7 @@ from lib.data.datasets import get_dataset
 from lib.fedtrainer import ControllerEvaluationStrategy, ControllerModelSavingStrategy, \
     FedController, LearnerEvaluationStrategy, \
     LearnerMetaData, \
-    LearnerModelSavingStrategy
+    LearnerModelSavingStrategy, ParallelFedController
 from lib.models.regression import Regression
 
 
@@ -39,6 +39,7 @@ def parser_setup():
         default=["test", "train"]
         )
     parser.add_argument("--statefile", "-s", required=False, default=None)
+    parser.add_argument("--use_parallel_controller", default=False, type=str2bool)
 
     # data related arguments
     parser.add_argument("--data.name", "-d", required=False, choices=["brain_age"])
@@ -147,6 +148,7 @@ if __name__ == "__main__":
 
     # set seeds etc here
     torch.backends.cudnn.benchmark = True
+    torch.multiprocessing.set_start_method('spawn')
 
     # define logger etc
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
@@ -204,17 +206,36 @@ if __name__ == "__main__":
                 )
             )
 
-    fed_trainer = FedController(
-        learners=[i.create_learner() for i in learners_metadata],
-        device=config.device,
-        test_loader=test_loader,
-        result_dir=config.result_folder,
-        model_saving_strategy=ControllerModelSavingStrategy(
-            config.train.community_model_saving_strategy
-            ),
-        evaluation_strategy=ControllerEvaluationStrategy(config.train.community_evaluation_strategy)
-        )
 
-    fed_trainer.train(
-        num_rounds=config.train.num_rounds, epochs_per_round=config.train.epochs_per_round
-        )
+
+    if config.use_parallel_controller:
+        fed_trainer = ParallelFedController(
+            learners=[i.create_learner() for i in learners_metadata],
+            device=config.device,
+            test_loader=test_loader,
+            result_dir=config.result_folder,
+            model_saving_strategy=ControllerModelSavingStrategy(
+                config.train.community_model_saving_strategy
+                ),
+            evaluation_strategy=ControllerEvaluationStrategy(config.train.community_evaluation_strategy),
+            devices=["cuda:0", "cuda:1", "cuda:2", "cuda:3"] # hardcoded for now
+            )
+
+        fed_trainer.train(
+            num_rounds=config.train.num_rounds, epochs_per_round=config.train.epochs_per_round
+            )
+    else:
+        fed_trainer = FedController(
+            learners=[i.create_learner() for i in learners_metadata],
+            device=config.device,
+            test_loader=test_loader,
+            result_dir=config.result_folder,
+            model_saving_strategy=ControllerModelSavingStrategy(
+                config.train.community_model_saving_strategy
+                ),
+            evaluation_strategy=ControllerEvaluationStrategy(config.train.community_evaluation_strategy)
+            )
+
+        fed_trainer.train(
+            num_rounds=config.train.num_rounds, epochs_per_round=config.train.epochs_per_round
+            )

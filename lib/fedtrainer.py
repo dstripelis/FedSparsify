@@ -392,9 +392,7 @@ class FedController:
 
         # save params
         if self.model_saving_strategy == ControllerModelSavingStrategy.END_OF_TRAINING:
-            self.learners[0].save(
-                f"{self.result_dir}/community_params_final.pt"
-                )
+            self.learners[0].save(f"{self.result_dir}/community_params_final.pt")
 
         # do evaluation
         if self.evaluation_strategy == ControllerEvaluationStrategy.END_OF_TRAINING:
@@ -422,9 +420,7 @@ class FedController:
 
         # save params
         if self.model_saving_strategy == ControllerModelSavingStrategy.EVERY_ROUND:
-            self.learners[0].save(
-                f"{self.result_dir}/community_params_round_{round}.pt"
-                )
+            self.learners[0].save(f"{self.result_dir}/community_params_round_{round}.pt")
 
         # do evaluation
         if self.evaluation_strategy == ControllerEvaluationStrategy.EVERY_ROUND:
@@ -443,12 +439,10 @@ class FedController:
 
     def on_learner_train_begin(self, **kwargs):
         logger.debug("Controller:In learner train begin")
-
         pass
 
     def on_learner_train_end(self, **kwargs):
         logger.debug("Controller:In learner train end")
-
         pass
 
     def evaluate(self, loader, **kwargs):
@@ -456,3 +450,117 @@ class FedController:
         result = self.community_evaluator.evaluate(loader)
         self.community_evaluator.model.to("cpu")
         return result
+
+
+# TODO:
+#  - SummaryWriter is not picklable which gives the thread._lock error. Find an alternate to that
+#  - Logger doesnot work properly, use this solution https://stackoverflow.com/questions/16933888/logging-while-using-parallel-python
+#  - the target argument to process has to be a global function, not attached to class. 
+class ParallelFedController(FedController):
+
+    def __init__(
+            self, learners: typing.List[Learner], device: str,
+            test_loader=typing.Optional[DataLoader], result_dir=typing.Optional[str],
+            model_saving_strategy=ControllerModelSavingStrategy.NEVER,
+            evaluation_strategy=ControllerEvaluationStrategy.NEVER,
+            devices: typing.Optional[typing.List] = None,
+            max_process_per_device: int = 1,
+            ):
+
+        super().__init__(
+            learners, device, test_loader, result_dir, model_saving_strategy, evaluation_strategy
+            )
+        if devices is None:
+            devices = []
+        self.devices = devices
+        self.max_process_per_device = max_process_per_device
+
+    def train(self, *, num_rounds, epochs_per_round, **kwargs):
+        from multiprocessing import Process
+
+        logger.info("Starting federation controller")
+        self.on_train_begin(
+            num_rounds=num_rounds,
+            epochs_per_round=epochs_per_round, **kwargs
+            )
+        # breakpoint()
+
+        for round in range(num_rounds):
+
+            logger.info(f"Starting round {round}")
+            self.on_round_begin(
+                round=round, num_rounds=num_rounds,
+                epochs_per_round=epochs_per_round, **kwargs
+                )
+            devices = self.devices * math.ceil(len(self.learners) / len(self.devices))
+
+            print(devices)
+            self.count = Value("i", 0)
+            processes = [Process(
+                target=_learner_training, kwargs={
+                    "learner"         : l,
+                    "round"           : round,
+                    "num_rounds"      : num_rounds,
+                    "epochs_per_round": epochs_per_round,
+                    "device"          : device,
+                    "counter"         : self.count
+                    }
+                ) for (l, device) in zip(self.learners, devices)]
+            idx = 0
+            max_process_count = self.max_process_per_device * len(self.devices)
+            while idx < len(processes):
+                if self.count.value < max_process_count:
+                    with self.count.get_lock():
+                        self.count.value += 1
+                    processes[idx].start()
+                    idx += 1
+                    print(idx)
+                else:
+                    sleep(10)
+            for p in processes:
+                logger.info("waiting")
+                p.join()
+
+            logger.info(f"Finished training learners in round {round}")
+
+            logger.info("Computing community updates")
+            community_params = self.combine_learners()
+
+            logger.info("Applying community updates")
+            [learner.set_params(community_params) for learner in self.learners]
+            self.community_evaluator.set_params(community_params)
+            self.on_round_end(
+                round=round, num_rounds=num_rounds,
+                epochs_per_round=epochs_per_round, **kwargs
+                )
+            logger.info(f"Round {round} finished")
+
+        self.on_train_end(
+            num_rounds=num_rounds,
+            epochs_per_round=epochs_per_round, **kwargs
+            )
+
+
+def _learner_training(
+        learner, round, num_rounds, epochs_per_round, device, counter, **kwargs
+        ):
+    logger.info(f"Round {round}: Training learner {learner.id}")
+    # self.on_learner_train_begin(
+    #     round=round, num_rounds=num_rounds, learner_id=learner.id,
+    #     epochs_per_round=epochs_per_round, **kwargs
+    #     )
+
+    learner.train(
+        num_epochs=epochs_per_round, device=device, epoch_offset=round * epochs_per_round,
+        round=round, **kwargs
+        )
+
+    # self.on_learner_train_end(
+    #     round=round, learner_id=learner.id, num_rounds=num_rounds,
+    #     epochs_per_round=epochs_per_round, **kwargs
+    #     )
+    logger.info(
+        f"Round {round}: Finished Training learner {learner.id}"
+        )
+    with counter.get_lock():
+        counter.value -= 1
