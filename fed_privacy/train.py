@@ -90,6 +90,11 @@ def parser_setup():
     parser.add_argument("--train.num_rounds", required=False, default=25, type=int)
     parser.add_argument("--train.epochs_per_round", required=False, default=4, type=int)
 
+    parser.add_argument("--train.differential_privacy", default=False, type=str2bool)
+    parser.add_argument("--train.virtual_batch_size", default=None, type=int)
+    parser.add_argument("--train.noise_multiplier", default=1.0, type=float)
+    parser.add_argument("--train.grad_norm", default=1.0, type=float)
+
     parser.add_argument("--test.batch_size", required=False, type=int, default=8)
     return parser
 
@@ -183,15 +188,20 @@ if __name__ == "__main__":
     # create learners
     optimizer_params = Box(
         {
-            "lr"             : config.train.lr,
-            "optimizer"      : config.train.optimizer,
-            "weight_decay"   : config.train.weight_decay,
-            "reset_optimizer": config.train.get("reset_optimizer", True)
+            "lr"                : config.train.lr,
+            "optimizer"         : config.train.optimizer,
+            "weight_decay"      : config.train.weight_decay,
+            "reset_optimizer"   : config.train.get("reset_optimizer", True),
+            "private_training"  : config.train.get("differential_privacy", False),
+            "virtual_batch_size": config.train.get("virtual_batch_size", config.train.batch_size),
+            "noise_multiplier"  : config.train.noise_multiplier,
+            "grad_norm"         : config.train.grad_norm,
             }
         )
 
     learners_metadata = []
     for idx, (m, t, v) in enumerate(zip(models, train_loaders, valid_loaders)):
+        optimizer_params.update({"sample_size": len(t.dataset)})
         learners_metadata.append(
             LearnerMetaData(
                 m, optimizer_params, id=idx + 1, train_loader=t, valid_loader=v,
@@ -206,8 +216,6 @@ if __name__ == "__main__":
                 )
             )
 
-
-
     if config.use_parallel_controller:
         fed_trainer = ParallelFedController(
             learners=[i.create_learner() for i in learners_metadata],
@@ -217,8 +225,10 @@ if __name__ == "__main__":
             model_saving_strategy=ControllerModelSavingStrategy(
                 config.train.community_model_saving_strategy
                 ),
-            evaluation_strategy=ControllerEvaluationStrategy(config.train.community_evaluation_strategy),
-            devices=["cuda:0", "cuda:1", "cuda:2", "cuda:3"] # hardcoded for now
+            evaluation_strategy=ControllerEvaluationStrategy(
+                config.train.community_evaluation_strategy
+                ),
+            devices=["cuda:0", "cuda:1", "cuda:2", "cuda:3"]  # hardcoded for now
             )
 
         fed_trainer.train(
@@ -233,7 +243,9 @@ if __name__ == "__main__":
             model_saving_strategy=ControllerModelSavingStrategy(
                 config.train.community_model_saving_strategy
                 ),
-            evaluation_strategy=ControllerEvaluationStrategy(config.train.community_evaluation_strategy)
+            evaluation_strategy=ControllerEvaluationStrategy(
+                config.train.community_evaluation_strategy
+                )
             )
 
         fed_trainer.train(

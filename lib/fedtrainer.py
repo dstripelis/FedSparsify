@@ -11,6 +11,7 @@ import dill
 import numpy
 import torch
 from box import Box
+from opacus import PrivacyEngine
 from torch import nn, optim
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -91,6 +92,13 @@ def get_optimizer(model, optimizer="adam", lr=1e-3, **kwargs):
             )
     else:
         raise Exception(f"{optimizer} not implemented")
+
+    if kwargs.get("private_training", False):
+        privacy_engine = PrivacyEngine(
+            model, kwargs["virtual_batch_size"], kwargs["sample_size"], alphas=list(range(2, 32)),
+            noise_multiplier=kwargs["noise_multiplier"], max_grad_norm=kwargs["grad_norm"]
+            )
+        privacy_engine.attach(optimizer)
 
     return optimizer
 
@@ -455,7 +463,7 @@ class FedController:
 # TODO:
 #  - SummaryWriter is not picklable which gives the thread._lock error. Find an alternate to that
 #  - Logger doesnot work properly, use this solution https://stackoverflow.com/questions/16933888/logging-while-using-parallel-python
-#  - the target argument to process has to be a global function, not attached to class. 
+#  - the target argument to process has to be a global function, not attached to class.
 class ParallelFedController(FedController):
 
     def __init__(
