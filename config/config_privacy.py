@@ -15,8 +15,8 @@ config = {
     "model.arch.file"                      : "lib/arch/brain_age_3d.py",
     "model.arch.attn_dim"                  : 32,
     "model.arch.attn_num_heads"            : 1,
-    "model.arch.attn_drop"                 : False,
-    "model.arch.agg_fn"                    : "attention",
+    "model.arch.attn_drop"                 : True,
+    "model.arch.agg_fn"                    : "mean",
 
     "train.batch_size"                     : 4,
     "train.optimizer"                      : "sgd",

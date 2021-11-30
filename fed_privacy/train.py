@@ -9,11 +9,11 @@ from box import Box
 from torch.utils.data import DataLoader
 
 from lib import os_utils
+from lib.controllers import ControllerEvaluationStrategy, ControllerModelSavingStrategy, \
+    FedController, ParallelFedController
 from lib.data.datasets import get_dataset
-from lib.fedtrainer import ControllerEvaluationStrategy, ControllerModelSavingStrategy, \
-    FedController, LearnerEvaluationStrategy, \
-    LearnerMetaData, \
-    LearnerModelSavingStrategy, ParallelFedController
+from lib.learners import LearnerEvaluationStrategy, LearnerMetaData, LearnerModelSavingStrategy
+
 from lib.models.regression import Regression
 
 
@@ -94,6 +94,9 @@ def parser_setup():
     parser.add_argument("--train.virtual_batch_size", default=None, type=int)
     parser.add_argument("--train.noise_multiplier", default=1.0, type=float)
     parser.add_argument("--train.grad_norm", default=1.0, type=float)
+
+    parser.add_argument("--train.unique_gradient_learner", default=False, type=str2bool)
+    parser.add_argument("--train.unique_gradient_scale", default=0.0, type=float)
 
     parser.add_argument("--test.batch_size", required=False, type=int, default=8)
     return parser
@@ -212,8 +215,10 @@ if __name__ == "__main__":
                     ),
                 evaluation_strategy=LearnerEvaluationStrategy(
                     config.train.learner_evaluation_strategy
-                    )
-                )
+                    ),
+                unique_gradient_learner=config.train.unique_gradient_learner,
+                scale=config.train.unique_gradient_scale,
+                ),
             )
 
     if config.use_parallel_controller:
