@@ -1,6 +1,8 @@
 import numpy as np
 import tensorflow as tf
 
+from simulatedFL.utils.model_purge import PurgeOps
+
 class MaskedCallback(tf.keras.callbacks.Callback):
 
 	def __init__(self, model_masks):
@@ -8,9 +10,7 @@ class MaskedCallback(tf.keras.callbacks.Callback):
 		self.model_masks = model_masks
 
 	def apply_model_masks(self):
-		model_weights = self.model.get_weights()
-		masked_weights = [np.multiply(model_weights[idx], mask) for idx, mask in enumerate(self.model_masks)]
-		self.model.set_weights(masked_weights)
+		PurgeOps.apply_model_masks(self.model, self.model_masks)
 
 	def on_train_begin(self, logs=None):
 		super(MaskedCallback, self).on_train_begin(logs)

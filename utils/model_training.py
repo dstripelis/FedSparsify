@@ -12,12 +12,14 @@ from simulatedFL.utils.model_merge import MergeOps
 from simulatedFL.utils.model_purge import PurgeOps
 from simulatedFL.utils.masked_callback import MaskedCallback
 from simulatedFL.utils.logger import CustomLogger
+from simulatedFL.utils.model_state import ModelState
 
 FederationRoundMetadata = namedtuple(typename='FederationRoundMetadata', field_names=['round_id', 'processing_time',
 																					  'global_model_total_params',
 																					  'global_model_test_loss',
 																					  'global_model_test_score',
-																					  'local_models_total_params',
+																					  'local_models_total_params_after_training',
+																					  'local_models_total_params_after_purging',
 																					  'local_models_train_loss',
 																					  'local_models_train_score',
 																					  'local_models_test_loss',
@@ -27,29 +29,71 @@ class ModelTraining:
 
 	class CentralizedTraining:
 
-		def __init__(self, epochs=200, batch_size=100):
+		def __init__(self, epochs=100, batch_size=100, fine_tune_epochs=0, purging_function=None):
+			# TODO Implement purging operation if needed!! For now we run everything using the FederatedTraining class.
 			self.epochs = epochs
 			self.batch_size = batch_size
+			self.fine_tune_epochs = fine_tune_epochs
+			self.purging_function = purging_function
+
+		def _construct_centralized_execution_stats(self):
+			res = {
+				"centralized_environment" : {
+					"total_epochs": self.epochs,
+					"batch_size": self.batch_size,
+					"fine_tune_epochs": self.fine_tune_epochs,
+					"purge_function": self.purging_function,
+					"start_purging_at_epoch": self.epochs
+				},
+				"centralized_execution_results" : list()
+			}
+			return res
+
+		def _model_fit(self, epochs, model, x_train, x_test, y_train, y_test):
+			train_losses, train_scores, test_losses, test_scores = [], [], [], []
+			for i in range(epochs):
+				train_results = model.fit(x_train, y_train, epochs=1, batch_size=self.batch_size, verbose=True)
+				train_loss, train_score = model.evaluate(x_train, x_test, batch_size=self.batch_size)
+				test_loss, test_score = model.evaluate(x_test, y_test, batch_size=self.batch_size)
+				train_losses.append(train_loss)
+				train_scores.append(train_score)
+				test_losses.append(test_loss)
+				test_scores.append(test_score)
+			return train_losses, train_scores, test_losses, test_scores
 
 		def start(self, get_model_fn, x_train, y_train, x_test, y_test, info="Some Feedback"):
 			"""Train."""
 			CustomLogger.info(("{}".format(info)))
 			model = get_model_fn()
-			epochs_test_eval_loss, epochs_test_eval_score = [], []
-			for i in range(self.epochs):
-				train_results = model.fit(x_train, y_train, epochs=1, batch_size=self.batch_size, verbose=True)
-				eval_loss, eval_score = model.evaluate(x_test, y_test, batch_size=self.batch_size)
-				epochs_test_eval_loss.append(eval_loss)
-				epochs_test_eval_score.append(eval_score)
-			eval_results = {"loss": epochs_test_eval_loss, "score":epochs_test_eval_score}
-			return eval_results
+			train_losses, train_scores, test_losses, test_scores = \
+				self._model_fit(self.epochs, model, x_train, x_test, y_train, y_test)
+			eval_results_before_pruning = \
+				{"train_losses": train_losses, "train_score": train_scores,
+				 "test_losses": test_losses, "test_scores": test_scores}
+
+			# if self.purging_function is not None:
+			# 	self.purging_function(model, model, self.epochs)
+
+			train_losses, train_scores, test_losses, test_scores = \
+				self._model_fit(self.fine_tune_epochs, model, x_train, x_test, y_train, y_test)
+			eval_results_after_pruning = \
+				{"train_losses": train_losses, "train_score": train_scores,
+				 "test_losses": test_losses, "test_scores": test_scores}
+
+			execution_stats = self._construct_centralized_execution_stats()
+			execution_stats["centralized_execution_results"] = {
+				"eval_results_before_pruning": eval_results_before_pruning,
+				"eval_results_after_pruning": eval_results_after_pruning,
+			}
+			return execution_stats
 
 
 	class FederatedTraining:
 
 		def __init__(self, merge_op, learners_num, rounds_num, local_epochs, learners_scaling_factors,
 					 participation_rate=1, batch_size=100, purge_op_local=None, purge_op_global=None,
-					 fine_tuning_epochs=0, initialization_state=Model.InitializationStates.RANDOM,
+					 start_purging_at_round=0, fine_tuning_epochs=0, train_with_global_mask=False,
+					 start_training_with_global_mask_at_round=0, initialization_state=Model.InitializationStates.RANDOM,
 					 burnin_period_epochs=0, round_robin_period_epochs=0, output_arrays_dir=None):
 
 			# Required attributes.
@@ -67,7 +111,12 @@ class ModelTraining:
 			# Optional attributes related to federated purging and merging.
 			self.purge_op_local = purge_op_local
 			self.purge_op_global = purge_op_global
+			self.start_purging_at_round = start_purging_at_round
 			self.fine_tuning_epochs = fine_tuning_epochs
+
+			# Whether training is carried out exclusively on the parameters of the global model.
+			self.train_with_global_mask = train_with_global_mask
+			self.start_training_with_global_mask_at_round = start_training_with_global_mask_at_round
 
 			# Optional attributes related to federated model initialization state experiments.
 			self.initialization_state = initialization_state
@@ -75,7 +124,7 @@ class ModelTraining:
 			self.round_robin_period_epochs = round_robin_period_epochs
 
 			# A json representation of the federated session with its associated training results.
-			self.execution_stats = self.construct_federated_execution_stats()
+			self.execution_stats = self._construct_federated_execution_stats()
 
 			# Print the execution results.
 			CustomLogger.info(self.execution_stats)
@@ -84,12 +133,17 @@ class ModelTraining:
 			self.output_arrays_dir = output_arrays_dir
 			if not os.path.exists(self.output_arrays_dir):
 				os.makedirs(self.output_arrays_dir)
+			self.local_model_fname_template = os.path.join(self.output_arrays_dir,
+														   "local_model_{}_federation_round_{}.npz")
 			self.local_model_masks_fname_template = os.path.join(self.output_arrays_dir,
 																 "local_model_{}_masks_federation_round_{}.npz")
+			self.global_model_fname_template = os.path.join(self.output_arrays_dir,
+															"global_model_federation_round_{}.npz")
 			self.global_model_masks_fname_template = os.path.join(self.output_arrays_dir,
 																  "global_model_masks_federation_round_{}.npz")
 
-		def construct_federated_execution_stats(self):
+
+		def _construct_federated_execution_stats(self):
 			res = {
 				"federated_environment" : {
 					"merge_function": None if self.merge_op is None else str(self.merge_op.__class__.__name__),
@@ -101,6 +155,9 @@ class ModelTraining:
 					"batch_size_per_client" : self.batch_size,
 					"purge_function_local": None if self.purge_op_local is None else str(self.purge_op_local.__class__.__name__),
 					"purge_function_global": None if self.purge_op_global is None else str(self.purge_op_global.__class__.__name__),
+					"start_purging_at_round": self.start_purging_at_round,
+					"train_with_global_mask": self.train_with_global_mask,
+					"start_training_with_global_mask_at_round": self.start_training_with_global_mask_at_round,
 					"fine_tuning_epochs": self.fine_tuning_epochs,
 					"federated_model_initialization_state" : self.initialization_state,
 					"burnin_period_epochs" : self.burnin_period_epochs,
@@ -179,20 +236,6 @@ class ModelTraining:
 			return random_models_idx
 
 
-		def count_non_zero_elems(self, model):
-			return sum([np.count_nonzero(matrix) for matrix in model.get_weights()])
-
-
-		def get_model_binary_masks(self, model):
-			model_weights = model.get_weights()
-			masks = []
-			for m in model_weights:
-				mask = np.array([0 if p == 0.0 else 1 for p in m.flatten()])
-				mask = mask.reshape(m.shape)
-				masks.append(mask)
-			return masks
-
-
 		def train_models(self, models, epochs_num, x_train_chunks, y_train_chunks, models_masks=None):
 			for midx, model in enumerate(models):
 
@@ -200,7 +243,7 @@ class ModelTraining:
 				if models_masks is not None:
 					"We always apply the mask (if it is given), even when a callback will not take place."
 					masks = models_masks[midx]
-					PurgeOps.purge_model(model, masks)
+					PurgeOps.apply_model_masks(model, masks)
 					callbacks.append(MaskedCallback(model_masks=masks))
 
 				model.fit(
@@ -246,14 +289,16 @@ class ModelTraining:
 			federation_rounds_stats = []
 			global_weights = self.set_initial_federation_model_state(gmodel, lmodels, x_train_chunks, y_train_chunks)
 			gmodel.set_weights(global_weights)
+			gmodel_binary_masks = ModelState.get_model_binary_masks(gmodel)
 			# count number of model parameters
-			global_model_num_params = self.count_non_zero_elems(gmodel)
+			global_model_num_params = ModelState.count_non_zero_elems(gmodel)
 
 			# eval global model
 			gmodel_loss, gmodel_score = gmodel.evaluate(x_test, y_test, verbose=False)
 
 			# metadata collectors
-			local_models_num_params = []
+			non_zero_elements_after_training = []
+			non_zero_elements_after_purging = []
 			local_models_train_loss = []
 			local_models_train_score = []
 			local_models_test_loss = []
@@ -264,7 +309,8 @@ class ModelTraining:
 																global_model_total_params=global_model_num_params,
 																global_model_test_loss=gmodel_loss,
 																global_model_test_score=gmodel_score,
-																local_models_total_params=local_models_num_params,
+																local_models_total_params_after_training=non_zero_elements_after_training,
+																local_models_total_params_after_purging=non_zero_elements_after_purging,
 																local_models_train_loss=local_models_train_loss,
 																local_models_train_score=local_models_train_score,
 																local_models_test_loss=local_models_test_loss,
@@ -290,31 +336,42 @@ class ModelTraining:
 				# print number of learners
 				CustomLogger.info("Total Local Models: {}".format(len(models_subset)))
 
-				# normal training
+				# normal training w/ or w/o global mask - if True, we need to augment the global_model_masks collection
+				# with one global mask per local model, hence the [gmodel_binary_masks] * len(models_subset) multiplication!
+				global_model_masks = None
+				if self.train_with_global_mask is True and round_id > self.start_training_with_global_mask_at_round:
+					global_model_masks = [gmodel_binary_masks] * len(models_subset)
+
+				# Train models.
 				models_subset = self.train_models(models_subset, self.local_epochs,
 												  x_train_chunks_subset,
-												  y_train_chunks_subset)
+												  y_train_chunks_subset,
+												  models_masks=global_model_masks)
 
-				models_subset_masks = None
-				if self.purge_op_local is not None:
-					# compute training masks after purging operation
+				# collection with local model sizes after training / before pruning for the current round
+				non_zero_elements_after_training = [ModelState.count_non_zero_elems(model) for model in models_subset]
+				CustomLogger.info("Local models NNZ-params after training: {}".format(non_zero_elements_after_training))
+
+				if self.purge_op_local is not None and round_id > self.start_purging_at_round:
+					# purge function __call__() definition: (purging_model, global_model, federation_round)
 					models_subset_masks = [self.purge_op_local(lmodel, gmodel, round_id) for lmodel in models_subset]
 
 					# fine-tuning on pruned_models
 					models_subset = self.train_models(models_subset, self.fine_tuning_epochs,
 													  x_train_chunks_subset, y_train_chunks_subset,
 													  models_masks=models_subset_masks)
+				else:
+					models_subset_masks = [ModelState.get_model_binary_masks(lmodel) for lmodel in models_subset]
 
 				# save local models masks
 				for lidx, lmodel in enumerate(models_subset):
-					lmodel_binary_masks = self.get_model_binary_masks(lmodel)
+					lmodel_binary_masks = ModelState.get_model_binary_masks(lmodel)
+					np.savez(self.local_model_fname_template.format(lidx, round_id), *lmodel.get_weights())
 					np.savez(self.local_model_masks_fname_template.format(lidx, round_id), *lmodel_binary_masks)
 
-				# collection with local model sizes for the current round
-				local_models_num_params = []
-				for model in models_subset:
-					local_models_num_params.append(self.count_non_zero_elems(model))
-				CustomLogger.info("Total Local Models Params: {}".format(local_models_num_params))
+				# collection with local model sizes after pruning for the current round
+				non_zero_elements_after_purging = [ModelState.count_non_zero_elems(model) for model in models_subset]
+				CustomLogger.info("Local models NNZ-params after purging: {}".format(non_zero_elements_after_purging))
 
 				# evaluation of local models on local training and global test set
 				local_models_train_loss, local_models_train_score, local_models_test_loss, local_models_test_score = \
@@ -322,19 +379,21 @@ class ModelTraining:
 										 models_subset_masks)
 
 				self.merge_op.set_scaling_factors(scaling_factors_subset)
-				global_weights = self.merge_op(models_subset, models_subset_masks)
+				global_weights = self.merge_op(models_subset, models_subset_masks, global_model=gmodel)
 				# set global model weights
 				gmodel.set_weights(global_weights)
 
-				if self.purge_op_global is not None:
-					global_model_masks = self.purge_op_global(gmodel)
-					PurgeOps.purge_model(gmodel, global_model_masks)
+				if self.purge_op_global is not None and round_id > self.start_purging_at_round:
+					# purge function __call__() definition: (purging_model, global_model, federation_round)
+					global_model_masks = self.purge_op_global(gmodel, gmodel, round_id)
+					PurgeOps.apply_model_masks(gmodel, global_model_masks)
 
 				# count number of model parameters
-				global_model_num_params = self.count_non_zero_elems(gmodel)
+				global_model_num_params = ModelState.count_non_zero_elems(gmodel)
 				# find global model binary masks
-				gmodel_binary_masks = self.get_model_binary_masks(gmodel)
-				# save global model masks
+				gmodel_binary_masks = ModelState.get_model_binary_masks(gmodel)
+				# save global model and masks masks
+				np.savez(self.global_model_fname_template.format(round_id), *gmodel.get_weights())
 				np.savez(self.global_model_masks_fname_template.format(round_id), *gmodel_binary_masks)
 
 				# eval global model
@@ -356,13 +415,13 @@ class ModelTraining:
 																	global_model_total_params=global_model_num_params,
 																	global_model_test_loss=gmodel_loss,
 																	global_model_test_score=gmodel_score,
-																	local_models_total_params=local_models_num_params,
+																	local_models_total_params_after_training=non_zero_elements_after_training,
+																	local_models_total_params_after_purging=non_zero_elements_after_purging,
 																	local_models_train_loss=local_models_train_loss,
 																	local_models_train_score=local_models_train_score,
 																	local_models_test_loss=local_models_test_loss,
 																	local_models_test_score=local_models_test_score)
 				federation_rounds_stats.append(federation_round_metadata._asdict())
-
 
 			# clear memory
 			del lmodels
