@@ -232,8 +232,8 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 				 total_iterations, delta_iteration_pruning,
 				 centralized_model=False, federated_model=False):
 		"""
-		Semantically, `iterations` refer to the epoch-level granularity in the 
-		centralized case, whereas in the federated case it refers to the federation round. 
+		Semantically, `iterations` refer to the epoch-level granularity in the
+		centralized case, whereas in the federated case it refers to the federation round.
 		"""
 		assert self.centralized_model or self.federated_model
 		self.start_at_iteration = start_at_iteration
@@ -318,6 +318,74 @@ class PurgeSNIP(PurgeOps):
 		trainable_var_names = [v.name for v in model.trainable_variables]
 		grads = tape.gradient(loss, model.trainable_weights)
 		saliences = [tf.abs(grad * weight) for weight, grad in zip(model.trainable_variables, grads)]
+		saliences_flat = tf.concat([tf.reshape(s, -1) for s in saliences], 0)
+
+		k = tf.dtypes.cast(
+			tf.math.round(
+				tf.dtypes.cast(tf.size(saliences_flat), tf.float32) *
+				(1 - sparsity)), tf.int32)
+		# print(k,"/",tf.size(saliences_flat))
+		values, _ = tf.math.top_k(
+			saliences_flat, k=tf.size(saliences_flat)
+		)
+		current_threshold = tf.gather(values, k - 1)
+		# print(current_threshold)
+		trainable_var_masks = [np.array(tf.cast(tf.greater_equal(s, current_threshold), dtype=s.dtype))
+							   for s in saliences]
+
+		# Now need to combine masks for both trainable and non trainable parameters.
+		model_masks = []
+		trainable_var_masks_iter = iter(trainable_var_masks)
+		for v in model.variables:
+			if v.name not in trainable_var_names:
+				model_masks.append(np.ones(v.shape))
+			else:
+				model_masks.append(next(trainable_var_masks_iter))
+		return model_masks
+
+
+class PurgeGrasp(PurgeOps):
+
+	def __init__(self, model, sparsity, x, y):
+		""" You feed a random input sample (x,y) to the model and
+		compute the model masks based on connections saliency. """
+		super(PurgeGrasp, self).__init__()
+		self.precomputed_masks = self.__grasp_purging(model, sparsity, x, y)
+
+	def __call__(self, purging_model, global_model=None, federation_round=None):
+		""" Always return the precomputed binary masks returned by SNIP. """
+		return self.precomputed_masks
+
+	def __grasp_purging(self, model, sparsity, x, y):
+		import tensorflow as tf
+		x = tf.convert_to_tensor(x)
+		y = tf.convert_to_tensor(y)
+
+		# compute gradient
+		with tf.GradientTape() as tape:
+			y_pred = model(x)
+			loss = model.compiled_loss(y, y_pred)
+
+		trainable_var_names = [v.name for v in model.trainable_variables]
+		# compute gradient
+		grads = tape.gradient(loss, model.trainable_weights)
+
+		# compute hessian-gradient product
+		# see https://github.com/tensorflow/tensorflow/blob/f8ca8b7422fb4536821ee89e9d107b26aad7f542/tensorflow/python/eager/benchmarks/resnet50/hvp_test.py#L62
+		with tf.GradientTape() as outer_tape:
+			with tf.GradientTape() as inner_tape:
+				y_pred = model(x)
+				loss = model.compiled_loss(y, y_pred)
+			inner_grads = inner_tape.gradient(loss, model.trainable_variables)
+		hessian_grad_product = outer_tape.gradient(
+			inner_grads, model.trainable_variables, output_gradients=grads
+			)
+
+		# Grasp computes -Hg * \theta (eq 8) and remove the top scoring weights.
+		# Here we wil consider the Hg * \theta and remove the lowest scoring weights.
+		# The two are equivalient
+
+		saliences = [hg * weight for weight, hg in zip(model.trainable_variables, hessian_grad_product)]
 		saliences_flat = tf.concat([tf.reshape(s, -1) for s in saliences], 0)
 
 		k = tf.dtypes.cast(
