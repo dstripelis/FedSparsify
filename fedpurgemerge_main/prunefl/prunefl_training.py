@@ -25,67 +25,89 @@ FederationRoundMetadata = namedtuple(typename='FederationRoundMetadata', field_n
 																					  'local_models_test_loss',
 																					  'local_models_test_score'])
 
-class ModelTraining:
+class PruneFLTraining:
 
-	class CentralizedTraining:
+	class PruneFLReadjustment(object):
 
-		def __init__(self, epochs=100, batch_size=100, fine_tune_epochs=0, purging_function=None):
-			# TODO Implement purging operation if needed!! For now we run everything using the FederatedTraining class.
-			self.epochs = epochs
-			self.batch_size = batch_size
-			self.fine_tune_epochs = fine_tune_epochs
-			self.purging_function = purging_function
+		def __init__(self, trainable_vars_times, non_trainable_vars_times, prune_rate=0.3):
+			self.trainable_vars_times = trainable_vars_times
+			self.non_trainable_vars_times = non_trainable_vars_times
+			self.prune_rate = prune_rate
 
-		def _construct_centralized_execution_stats(self):
-			res = {
-				"centralized_environment" : {
-					"total_epochs": self.epochs,
-					"batch_size": self.batch_size,
-					"fine_tune_epochs": self.fine_tune_epochs,
-					"purge_function": self.purging_function,
-					"start_purging_at_epoch": self.epochs
-				},
-				"centralized_execution_results" : list()
-			}
-			return res
+		@classmethod
+		def compute_gradients(cls, model, x, y):
+			x = tf.convert_to_tensor(x)
+			y = tf.convert_to_tensor(y)
 
-		def _model_fit(self, epochs, model, x_train, x_test, y_train, y_test):
-			train_losses, train_scores, test_losses, test_scores = [], [], [], []
-			for i in range(epochs):
-				train_results = model.fit(x_train, y_train, epochs=1, batch_size=self.batch_size, verbose=True)
-				train_loss, train_score = model.evaluate(x_train, x_test, batch_size=self.batch_size)
-				test_loss, test_score = model.evaluate(x_test, y_test, batch_size=self.batch_size)
-				train_losses.append(train_loss)
-				train_scores.append(train_score)
-				test_losses.append(test_loss)
-				test_scores.append(test_score)
-			return train_losses, train_scores, test_losses, test_scores
+			with tf.GradientTape() as tape:
+				y_pred = model(x)
+				loss = model.compiled_loss(y, y_pred)
 
-		def start(self, get_model_fn, x_train, y_train, x_test, y_test, info="Some Feedback"):
-			"""Train."""
-			CustomLogger.info(("{}".format(info)))
-			model = get_model_fn()
-			train_losses, train_scores, test_losses, test_scores = \
-				self._model_fit(self.epochs, model, x_train, x_test, y_train, y_test)
-			eval_results_before_pruning = \
-				{"train_losses": train_losses, "train_score": train_scores,
-				 "test_losses": test_losses, "test_scores": test_scores}
+			# Gradients are only computed for the trainable weights/variables.
+			grads = tape.gradient(loss, model.trainable_weights)
+			grads_np = []
+			for g in grads:
+				if isinstance(g, tf.IndexedSlices):
+					dense_shape = g.dense_shape.numpy()
+					g = g.values.numpy().flatten()[:np.prod(dense_shape)]
+					g = g.reshape(dense_shape)
+					grads_np.append(g)
+				else:
+					grads_np.append(np.array(g))
+			return grads_np
 
-			# if self.purging_function is not None:
-			# 	self.purging_function(model, model, self.epochs)
+		def readjust_model_masks(self, model, gradients, federation_round=0, total_rounds=200):
+			num_remaining_params = lambda r, R: 1 - self.prune_rate * np.power(0.5, r / R)
+			importances = []
+			for i, g in enumerate(gradients):
+				g = np.square(g)
+				g = np.divide(g, self.trainable_vars_times[i])
+				importances.append(g)
 
-			train_losses, train_scores, test_losses, test_scores = \
-				self._model_fit(self.fine_tune_epochs, model, x_train, x_test, y_train, y_test)
-			eval_results_after_pruning = \
-				{"train_losses": train_losses, "train_score": train_scores,
-				 "test_losses": test_losses, "test_scores": test_scores}
+			t = 0.2
+			delta_M = 0
+			cat_grad = np.concatenate([g.flatten() for g in gradients])
+			cat_imp = np.concatenate([i.flatten() for i in importances])
+			# We need descending order, hence the negation.
+			indices = np.argsort(-cat_grad)
+			n_required = num_remaining_params(federation_round, total_rounds) * cat_grad.size
+			n_grown = 0
 
-			execution_stats = self._construct_centralized_execution_stats()
-			execution_stats["centralized_execution_results"] = {
-				"eval_results_before_pruning": eval_results_before_pruning,
-				"eval_results_after_pruning": eval_results_after_pruning,
-			}
-			return execution_stats
+			masks = []
+			for g in gradients:
+				masks.append(np.zeros_like(g))
+
+			for j, i in enumerate(indices):
+				if cat_imp[i] >= delta_M / t or n_grown <= n_required:
+					index_within_layer = i.item()
+					for layer_idx in range(len(self.trainable_vars_times)):
+						size = gradients[layer_idx].size
+						if index_within_layer >= size:
+							index_within_layer -= size
+						else:
+							break
+
+					delta_M += cat_grad[i]
+					t += self.trainable_vars_times[layer_idx]
+
+					shape = tuple(masks[layer_idx].shape)
+					masks[layer_idx][np.unravel_index(index_within_layer, shape)] = 1
+					n_grown += 1
+				else:
+					break
+
+			print("Readjustment Density:", n_grown / cat_imp.size)
+
+			# Set up the masks by reconstructing the sequence of the
+			# model's trainable and non-trainable parameters.
+			final_model_masks = []
+			trainable_var_masks_iter = iter(masks)
+			for v in model.variables:
+				if v.trainable:
+					final_model_masks.append(next(trainable_var_masks_iter))
+				else:
+					final_model_masks.append(np.ones(v.shape))
+			return final_model_masks
 
 
 	class FederatedTraining:
@@ -94,7 +116,8 @@ class ModelTraining:
 					 participation_rate=1, batch_size=100, purge_op_local=None, purge_op_global=None,
 					 start_purging_at_round=0, fine_tuning_epochs=0, train_with_global_mask=False,
 					 start_training_with_global_mask_at_round=0, initialization_state=Model.InitializationStates.RANDOM,
-					 burnin_period_epochs=0, round_robin_period_epochs=0, output_arrays_dir=None, precomputed_masks=None):
+					 burnin_period_epochs=0, round_robin_period_epochs=0, output_arrays_dir=None, precomputed_masks=None,
+					 masks_readjustment_rounds=50, prunefl_training_context=None):
 
 			# Required attributes.
 			assert isinstance(merge_op, MergeOps)
@@ -123,12 +146,6 @@ class ModelTraining:
 			self.burnin_period_epochs = burnin_period_epochs
 			self.round_robin_period_epochs = round_robin_period_epochs
 
-			# A json representation of the federated session with its associated training results.
-			self.execution_stats = self._construct_federated_execution_stats()
-
-			# Print the execution results.
-			CustomLogger.info(self.execution_stats)
-
 			# Create the directory if not exists.
 			self.output_arrays_dir = output_arrays_dir
 			if not os.path.exists(self.output_arrays_dir):
@@ -143,6 +160,14 @@ class ModelTraining:
 																  "global_model_masks_federation_round_{}.npz")
 
 			self.precomputed_masks = precomputed_masks
+			self.masks_readjustment_rounds = masks_readjustment_rounds
+			self.prunefl_training_context = prunefl_training_context
+
+			# A json representation of the federated session with its associated training results.
+			self.execution_stats = self._construct_federated_execution_stats()
+
+			# Print the execution stats.
+			CustomLogger.info(self.execution_stats)
 
 		def _construct_federated_execution_stats(self):
 			res = {
@@ -162,7 +187,9 @@ class ModelTraining:
 					"fine_tuning_epochs": self.fine_tuning_epochs,
 					"federated_model_initialization_state" : self.initialization_state,
 					"burnin_period_epochs" : self.burnin_period_epochs,
-					"round_robin_period_epochs": self.round_robin_period_epochs
+					"round_robin_period_epochs": self.round_robin_period_epochs,
+					"with_precomputed_masks": True if self.precomputed_masks is not None else False,
+					"masks_readjustment_rounds": self.masks_readjustment_rounds
 				},
 				"federated_execution_results" : list()
 			}
@@ -344,6 +371,20 @@ class ModelTraining:
 				global_model_masks = None
 				if self.train_with_global_mask is True and round_id > self.start_training_with_global_mask_at_round:
 					global_model_masks = [gmodel_binary_masks] * len(models_subset)
+
+					# PruneFL logic!!!
+					if round_id % self.masks_readjustment_rounds == 0:
+						all_gradients = None
+						for lmodel, x_chunk, y_chunk in zip(models_subset, x_train_chunks, y_train_chunks):
+							model_gradients = self.prunefl_training_context \
+								.compute_gradients(lmodel, x_chunk, y_chunk)
+							if all_gradients is None:
+								all_gradients = model_gradients
+							else:
+								all_gradients = [np.add(g1, g2) for g1, g2 in zip(all_gradients, model_gradients)]
+						model_masks = self.prunefl_training_context.readjust_model_masks(
+							gmodel, all_gradients, federation_round=round_id, total_rounds=self.rounds_num)
+						global_model_masks = [model_masks] * len(models_subset)
 
 				# Train models.
 				models_subset = self.train_models(models_subset, self.local_epochs,

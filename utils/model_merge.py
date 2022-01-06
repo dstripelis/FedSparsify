@@ -155,6 +155,7 @@ class MergeAbsMax(MergeAbs):
 										  by_abs_min=False,
 										  discard_zeroes=False)
 
+
 class MergeAbsMin(MergeAbs):
 
 	def __init__(self, scaling_factors, discard_zeroes=False):
@@ -200,9 +201,50 @@ class MergeWeightedAverageMajorityVoting(MergeOps):
 
 		# Step-2: We use the "Majority Voting Mask" {values: 0, 1}, to see which parameters will contribute to the final
 		# model for every learner and then "scale" each position with the associated scaling factor of each learner.
+		# CAUTION: The following considers 0s as part of the weighted average.
 		models_masks_scaled = []
 		for factor in self._scaling_factors:
 			model_masks_flatten_scaled = [np.multiply(factor, m) for m in masks_majority_voting]
+			models_masks_scaled.append(model_masks_flatten_scaled)
+
+		# An alternative approach is to discard 0s from the final weighted (MajorityVotingNNZ) average by applying a
+		# logical and between the mask of the majority voting and the original model mask.
+		# models_masks_scaled = []
+		# for idx, factor in enumerate(self._scaling_factors):
+		# 	model_masks_flatten_scaled = \
+		# 	[np.multiply(factor, mmv*mm) for mmv, mm in zip(masks_majority_voting, models_masks[idx])]
+		# 	models_masks_scaled.append(model_masks_flatten_scaled)
+
+		final_model = self.__class__.merged_model_with_normalized_masks(models, models_masks_scaled)
+
+		return final_model
+
+
+class MergeWeightedAverageNNZMajorityVoting(MergeOps):
+
+	def __init__(self, scaling_factors):
+		super(MergeWeightedAverageNNZMajorityVoting, self).__init__(scaling_factors=scaling_factors)
+
+	def __call__(self, models, models_masks=None, *args, **kwargs):
+		num_models = len(models)
+		majority_voting_threshold = np.floor(np.divide(num_models, 2))
+
+		# Step-1: Add up all masks
+		masks_sum = models_masks[0]
+		for model_masks in models_masks[1:]:
+			masks_sum = [np.add(m1.flatten(), m2.flatten()) for m1, m2 in zip(masks_sum, model_masks)]
+
+		masks_majority_voting = []
+		for m in masks_sum:
+			masks_majority_voting.append([1 if p >= majority_voting_threshold else 0 for p in m])
+
+		# An alternative approach is to discard 0s from the final weighted (MajorityVotingNNZ) average by applying a
+		# logical and between the mask of the majority voting and the original model mask.
+		models_masks_scaled = []
+		for idx, learner_factor in enumerate(self._scaling_factors):
+			flatten_masks = [m.flatten() for m in models_masks[idx]]
+			model_masks_flatten_scaled = \
+			[np.multiply(learner_factor, mmv*mm) for mmv, mm in zip(masks_majority_voting, flatten_masks)]
 			models_masks_scaled.append(model_masks_flatten_scaled)
 
 		final_model = self.__class__.merged_model_with_normalized_masks(models, models_masks_scaled)

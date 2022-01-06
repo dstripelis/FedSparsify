@@ -25,14 +25,14 @@ class CifarCNN(Model):
 								activation='relu', kernel_initializer=self.kernel_initializer, padding='same'))
 		model.add(layers.MaxPool2D(pool_size=2))
 
-		# model.add(layers.BatchNormalization())
+		model.add(layers.BatchNormalization())
 		model.add(layers.Conv2D(filters=128, kernel_size=3, activation='relu',
 								kernel_initializer=self.kernel_initializer, padding='same'))
 		model.add(layers.Conv2D(filters=128, kernel_size=3, activation='relu',
 								kernel_initializer=self.kernel_initializer, padding='same'))
 		model.add(layers.MaxPool2D(pool_size=2))
 
-		# model.add(layers.BatchNormalization())
+		model.add(layers.BatchNormalization())
 		model.add(layers.Conv2D(filters=128, kernel_size=3, activation='relu',
 								kernel_initializer=self.kernel_initializer, padding='same'))
 		model.add(layers.Conv2D(filters=128, kernel_size=3, activation='relu',
@@ -41,7 +41,7 @@ class CifarCNN(Model):
 
 		model.add(layers.Flatten())
 		model.add(layers.Dense(512, activation='relu', kernel_initializer=self.kernel_initializer))
-		# model.add(layers.Dropout(0.2))
+		model.add(layers.Dropout(0.2))
 
 		if self.cifar_10:
 			model.add(layers.Dense(10, activation='softmax'))

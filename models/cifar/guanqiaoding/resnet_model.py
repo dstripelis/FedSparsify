@@ -24,7 +24,17 @@ weight_decay = 1e-4
 
 class ResNet(Model):
 
-    def __init__(self, num_classes=10, num_blocks=3, learning_rate=0.01, momentum=0.9, metrics=["accuracy"]):
+    def __init__(self, num_classes=10, num_blocks=6, learning_rate=0.01, momentum=0.9, metrics=["accuracy"]):
+        """
+        Remember, num_blocks(n).
+        For ResNet-20 it means n=3 -> 6n+2 = 20.
+        For ResNet-32 it means n=5 -> 6n+2 = 32
+        :param num_classes:
+        :param num_blocks:
+        :param learning_rate:
+        :param momentum:
+        :param metrics:
+        """
         self.num_classes = num_classes
         self.num_blocks = num_blocks
         self.momentum = momentum

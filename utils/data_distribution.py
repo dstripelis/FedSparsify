@@ -39,7 +39,20 @@ class PartitioningScheme(object):
 
 
 	def non_iid_partition(self, classes_per_partition=2):
-		sorted_data = sorted(zip(self.x_train, self.y_train), key=lambda pair: pair[1])
+
+		""" If the y-data points contain numpy arrays, we need to convert it
+		to a list of values in order for the set/hash to take effect during
+		partitioning by the y-axis. """
+		y_are_ndarrays = False
+		if isinstance(self.y_train[0], np.ndarray):
+			y_are_ndarrays = True
+			y_converted_values = []
+			for v in self.y_train:
+				y_converted_values.extend(v.tolist())
+		else:
+			y_converted_values = self.y_train
+
+		sorted_data = sorted(zip(self.x_train, y_converted_values), key=lambda pair: pair[1])
 		x_train_sorted = [x for x, y in sorted_data]
 		y_train_sorted = [y for x, y in sorted_data]
 
@@ -77,6 +90,12 @@ class PartitioningScheme(object):
 				del y_chunks[idx-position]
 
 		x_chunk = np.array(x_chunks_all_clients)
+
+		""" Bring the format of the y-values back to their original numpy array format. """
+		if y_are_ndarrays:
+			for idx, y_chunk in enumerate(y_chunks_all_clients):
+				y_chunks_all_clients[idx] = [np.array(y) for y in y_chunk]
+
 		y_chunk = np.array(y_chunks_all_clients)
 		CustomLogger.info("Chunk size {}. X-attribute shape: {}, Y-attribute shape: {}".format(
 			chunk_size, x_chunk.shape, y_chunk.shape))

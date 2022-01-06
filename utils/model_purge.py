@@ -42,6 +42,9 @@ class PurgeOps:
 
 		return params_threshold, masks
 
+	def json(self):
+		pass
+
 
 class PurgeByWeightMagnitude(PurgeOps):
 	"""
@@ -76,16 +79,17 @@ class PurgeByNNZWeightMagnitude(PurgeOps):
 	""" This class implements the progressive pruning or multiplicative pruning. At every purging step, the number of
 	parameters we purge, is proportional to the total number of NoN-Zero parameters, i.e., sparsity_level * NNZ-params
 	whereas in the previous approaches, we purge by considering all parameters - including the zero parameters. """
-	def __init__(self, sparsity_level):
+	def __init__(self, sparsity_level, sparsify_every_k_round=1):
 		super(PurgeByNNZWeightMagnitude, self).__init__()
 		self.sparsity_level = sparsity_level
+		self.sparsify_every_k_round = sparsify_every_k_round
 
 	def __call__(self, purging_model, global_model=None, federation_round=None):
 		model_weights = purging_model.get_weights()
 		matrices_shapes = [matrix.shape for matrix in model_weights]
 		matrices_flattened = [matrix.flatten() for matrix in model_weights]
 
-		if self.sparsity_level > 0.0:
+		if self.sparsity_level > 0.0 and federation_round % self.sparsify_every_k_round == 0:
 			self.threshold, masks = self.purge_params(sparsity_level=self.sparsity_level,
 													  matrices_flattened=matrices_flattened,
 													  matrices_shapes=matrices_shapes,
@@ -95,30 +99,37 @@ class PurgeByNNZWeightMagnitude(PurgeOps):
 
 		return masks
 
+	def json(self):
+		return {"sparsity_level": self.sparsity_level, "sparsify_every_k_round": self.sparsify_every_k_round}
+
 
 class PurgeByNNZWeightMagnitudeRandom(PurgeOps):
 
 	def __init__(self, sparsity_level, num_params):
 		super(PurgeByNNZWeightMagnitudeRandom, self).__init__()
 		self.sparsity_level = sparsity_level
-		self.num_params = num_params
+		self.non_zero_params = num_params
 		self.permutation = np.random.permutation(np.arange(num_params))
-		self.non_zero_params = self.num_params
-		self.purging_params_num = 0
+		self.purging_elements_num = 0
+		self._previous_round_id = -1
 
 	def __call__(self, purging_model, global_model=None, federation_round=None):
 		model_weights = purging_model.get_weights()
 		matrices_shapes = [matrix.shape for matrix in model_weights]
 		matrices_flattened = [matrix.flatten() for matrix in model_weights]
+		flat_params = np.concatenate(matrices_flattened)
+		matrices_sizes = [m.size for m in matrices_flattened]
 
 		if self.sparsity_level > 0.0:
-			purging_elements_num = int(self.sparsity_level * len(self.non_zero_params))
-			CustomLogger.info("Sparsity Level: {}, Total Purging Elements: {}"
-							  .format(self.sparsity_level, purging_elements_num))
+
 			# Random indices selection.
-			self.purging_params_num += purging_elements_num
-			zeroing_indices = self.permutation[0: self.purging_params_num]
-			self.non_zero_params -= purging_elements_num
+			if self._previous_round_id != federation_round:
+				purging_elements_num = int(self.sparsity_level * self.non_zero_params)
+				self.purging_elements_num += purging_elements_num
+				self.non_zero_params -= purging_elements_num
+				self._previous_round_id = federation_round
+			CustomLogger.info("Total Purging Elements: {}".format(self.purging_elements_num))
+			zeroing_indices = self.permutation[0: self.purging_elements_num]
 
 			flat_params[zeroing_indices] = 0.0
 			matrices_edited = []
@@ -126,11 +137,10 @@ class PurgeByNNZWeightMagnitudeRandom(PurgeOps):
 			masks = []
 			for size in matrices_sizes:
 				matrices_edited.append(flat_params[start_idx: start_idx + size])
-				start_idx = size
+				start_idx += size
 			for m_flatten, shape in zip(matrices_edited, matrices_shapes):
 				mask = np.array([1 if p != 0.0 else 0 for p in m_flatten]).reshape(shape)
 				masks.append(mask)
-
 		else:
 			masks = ModelState.get_model_binary_masks(purging_model)
 

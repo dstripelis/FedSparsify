@@ -37,13 +37,11 @@ if __name__ == "__main__":
 	experiment_template = "IMDB.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
 	rounds_num = 200
-	learners_num_list = [10, 100]
-
+	learners_num_list = [10]
 	participation_rates_list = [1]
-	# participation_rates_list = [1, 0.5, 0.1]
 
-	sparsity_levels = [0.02]
-	start_sparsification_at_round = [0, 25]
+	sparsity_levels = [0]
+	start_sparsification_at_round = [0]
 
 	# One-Shot Pruning
 	# sparsity_levels = [0.0, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99]
@@ -57,67 +55,66 @@ if __name__ == "__main__":
 	local_epochs = 4
 	fine_tuning_epochs = [0]
 	batch_size = 32
-	train_with_global_mask = True
+	train_with_global_mask = False
 
-	for learners_num in learners_num_list:
-		for participation_rate in participation_rates_list:
-			for sparsity_level in sparsity_levels:
-				for sparsification_round in start_sparsification_at_round:
-					for fine_tuning_epoch_num in fine_tuning_epochs:
-						# fill in string placeholders
-						filled_in_template = experiment_template.format(rounds_num,
-																		learners_num,
-																		str(participation_rate).replace(".", ""),
-																		str(local_epochs),
-																		str(sparsity_level).replace(".", ""),
-																		str(sparsification_round),
-																		fine_tuning_epoch_num)
-						output_arrays_dir = output_npzarrays_dir + filled_in_template
+	for learners_num, participation_rate in zip(learners_num_list, participation_rates_list):
+		for sparsity_level in sparsity_levels:
+			for sparsification_round in start_sparsification_at_round:
+				for fine_tuning_epoch_num in fine_tuning_epochs:
+					# fill in string placeholders
+					filled_in_template = experiment_template.format(rounds_num,
+																	learners_num,
+																	str(participation_rate).replace(".", ""),
+																	str(local_epochs),
+																	str(sparsity_level).replace(".", ""),
+																	str(sparsification_round),
+																	fine_tuning_epoch_num)
+					output_arrays_dir = output_npzarrays_dir + filled_in_template
 
-						pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=learners_num)
-						x_chunks, y_chunks = pscheme.iid_partition()
-						# x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=1)
-						scaling_factors = [y_chunk.size for y_chunk in y_chunks]
+					pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=learners_num)
+					x_chunks, y_chunks = pscheme.iid_partition()
+					# x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=1)
+					scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 
-						# Merging Ops.
-						# merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
-						# merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
-						merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
+					# Merging Ops.
+					merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
+					# merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
+					# merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
 
-						# Purging Ops.
-						# purge_op = purge_ops.PurgeByWeightMagnitude(sparsity_level=sparsity_level)
-						purge_op = purge_ops.PurgeByNNZWeightMagnitude(sparsity_level=sparsity_level)
-						# purge_op = purge_ops.PurgeByNNZWeightMagnitudeRandom(sparsity_level=sparsity_level)
-						# purge_op = purge_ops.PurgeByLayerWeightMagnitude(sparsity_level=sparsity_level)
-						# purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level)
-						# purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=0,
-						# 												   sparsity_level_init=0.5,
-						# 												   sparsity_level_final=0.85,
-						# 												   total_rounds=rounds_num,
-						# 												   delta_round_pruning=1)
-						# sparsity_level = purge_op.to_json()
-						federated_training = ModelTraining.FederatedTraining(merge_op=merge_op,
-																			 learners_num=learners_num,
-																			 rounds_num=rounds_num,
-																			 local_epochs=local_epochs,
-																			 learners_scaling_factors=scaling_factors,
-																			 participation_rate=participation_rate,
-																			 batch_size=batch_size,
-																			 purge_op_local=purge_op,
-																			 purge_op_global=None,
-																			 start_purging_at_round=sparsification_round,
-																			 fine_tuning_epochs=fine_tuning_epoch_num,
-																			 train_with_global_mask=train_with_global_mask,
-																			 start_training_with_global_mask_at_round=sparsification_round,
-																			 output_arrays_dir=output_arrays_dir)
-						federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
-						federated_training.execution_stats['federated_environment']['data_distribution'] = \
-							pscheme.to_json_representation()
-						federated_training_results = federated_training.start(get_model_fn=model,
-																			  x_train_chunks=x_chunks,
-																			  y_train_chunks=y_chunks, x_test=x_test,
-																			  y_test=y_test, info="IMDB")
+					# Purging Ops.
+					# purge_op = purge_ops.PurgeByWeightMagnitude(sparsity_level=sparsity_level)
+					# purge_op = purge_ops.PurgeByNNZWeightMagnitude(sparsity_level=sparsity_level)
+					# purge_op = purge_ops.PurgeByNNZWeightMagnitudeRandom(sparsity_level=sparsity_level)
+					# purge_op = purge_ops.PurgeByLayerWeightMagnitude(sparsity_level=sparsity_level)
+					# purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level)
+					# purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=0,
+					# 												   sparsity_level_init=0.5,
+					# 												   sparsity_level_final=0.85,
+					# 												   total_rounds=rounds_num,
+					# 												   delta_round_pruning=1)
+					# sparsity_level = purge_op.to_json()
+					federated_training = ModelTraining.FederatedTraining(merge_op=merge_op,
+																		 learners_num=learners_num,
+																		 rounds_num=rounds_num,
+																		 local_epochs=local_epochs,
+																		 learners_scaling_factors=scaling_factors,
+																		 participation_rate=participation_rate,
+																		 batch_size=batch_size,
+																		 purge_op_local=None,
+																		 purge_op_global=None,
+																		 start_purging_at_round=sparsification_round,
+																		 fine_tuning_epochs=fine_tuning_epoch_num,
+																		 train_with_global_mask=train_with_global_mask,
+																		 start_training_with_global_mask_at_round=sparsification_round,
+																		 output_arrays_dir=output_arrays_dir)
+					federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
+					federated_training.execution_stats['federated_environment']['data_distribution'] = \
+						pscheme.to_json_representation()
+					federated_training_results = federated_training.start(get_model_fn=model,
+																		  x_train_chunks=x_chunks,
+																		  y_train_chunks=y_chunks, x_test=x_test,
+																		  y_test=y_test, info="IMDB")
 
-						execution_output_filename = output_logs_dir + filled_in_template + ".json"
-						with open(execution_output_filename, "w+", encoding='utf-8') as fout:
-							json.dump(federated_training_results, fout, ensure_ascii=False, indent=4)
+					execution_output_filename = output_logs_dir + filled_in_template + ".json"
+					with open(execution_output_filename, "w+", encoding='utf-8') as fout:
+						json.dump(federated_training_results, fout, ensure_ascii=False, indent=4)
