@@ -410,3 +410,162 @@ class PurgeGrasp(PurgeOps):
 			else:
 				model_masks.append(next(trainable_var_masks_iter))
 		return model_masks
+
+class PurgeDst(PurgeOps):
+
+	def __init__(self):
+		""" You feed a random input sample (x,y) to the model and
+		compute the model masks based on connections saliency. """
+		super(PurgeDst, self).__init__()
+
+	def _weights_by_layer(self, model, sparsity, sparsity_distribution="erk"):
+		# https://stackoverflow.com/questions/40444083/weights-by-name-in-keras
+		names = [weight.name for layer in model.layers for weight in layer.weights]
+		weights = model.get_weights()
+
+		sparsities = np.empty(len(names))
+		n_weights = np.zeros_like(sparsities, dtype=np.int)
+		layer_names = []
+
+		for i, (name, weight) in enumerate(zip(names, weights)):
+
+			n_weights[i] = weight.numel()
+
+			# bias : No pruning
+			if name[:-3] == "b":
+				sparsities[i] = 0.0
+			elif name[:-3] == "W":
+				if "conv" in name:
+					kernel_size = weight.shape[:2]
+					neur_out = weight.shape[3]
+					neur_in = weight.shape[2]
+
+				elif "fc" in name:
+					kernel_size = None
+					neur_out = weight.shape[1]
+					neur_in = weight.shape[0]
+
+				else:
+					raise Exception (f"layer {name} is not handled in DST")
+
+				if sparsity_distribution == 'uniform':
+					sparsities[i] = sparsity
+					continue
+
+				if sparsity_distribution == 'er':
+					sparsities[i] = 1 - (neur_in + neur_out) / (neur_in * neur_out)
+				elif sparsity_distribution == 'erk':
+					if "conv" in name:
+						sparsities[i] = 1 - (neur_in + neur_out + np.sum(kernel_size)) / (
+									neur_in * neur_out * np.prod(kernel_size))
+					else:
+						sparsities[i] = 1 - (neur_in + neur_out) / (neur_in * neur_out)
+				else:
+					raise ValueError('Unsupported sparsity distribution ' + sparsity_distribution)
+
+		# Now we need to renormalize sparsities.
+		# We need global sparsity S = sum(s * n) / sum(n) equal to desired
+		# sparsity, and s[i] = C n[i]
+		sparsities *= sparsity * np.sum(n_weights) / np.sum(sparsities * n_weights)
+
+		# removing this because we can deal with sparsity directly
+		# n_weights = np.floor((1 - sparsities) * n_weights)
+
+		return {layer_names[i]: n_weights[i] for i in range(len(layer_names))}
+
+	def __call__(self, purging_model, global_model=None, federation_round=None, sparsity=0.1, sparsity_distribution="erk"):
+
+		# this holds number of weights we want to keep
+		weights_by_layer = self._weights_by_layer(purging_model, sparsity, sparsity_distribution)
+
+		names = [weight.name for layer in purging_model.layers for weight in layer.weights]
+		weights = purging_model.get_weights()
+		matrices_shapes = [matrix.shape for matrix in weights]
+		matrices_flattened = [matrix.flatten() for matrix in weights]
+
+		masks = []
+		for midx, (matrix_flattened, matrix_shape) in enumerate(zip(matrices_flattened, matrices_shapes)):
+			CustomLogger.info("MatrixIdx: {}".format(midx))
+			m_threshold, m_masks = self.purge_params(sparsity_level=weights_by_layer[names[midx]],
+													 matrices_flattened=[matrix_flattened],
+													 matrices_shapes=[matrix_shape],
+													 nnz_threshold=False)
+			# Function self.purge_params() returns list, thus the indexing.
+			m_mask = m_masks[0]
+			masks.append(m_mask)
+			# thresholds.append(m_threshold)
+			# self.threshold = thresholds
+
+		return masks
+""""
+Notes on DST: 
+
+This is how DST works 
+	- Create global model. 
+	- Prune global model right away using the prune op above
+	- Start client training
+	- Compute readjustment_ratio, readjust and round_sparsity using the code below:
+		decay method is cosine ( alpha/2 * (1 + np.cos(t*np.pi / t_end))) use this formula; alpha = 0.01
+		rate_decay_end is num_rounds//2 
+		args.sparsity and args.final sparsity are same thing, so round_sparsity will be same as final sparsity. 
+	- Train the client 
+		While training use this criteria to prune on client level 
+			- if (self.curr_epoch - args.pruning_begin) % args.pruning_interval == 0 and readjust:
+			# I don't know what is up but they didnot use the schedule. They just use the adjustment ratio as is in the code. 
+			prune_sparsity = sparsity + (1 - sparsity) * args.readjustment_ratio
+			^ This is the level we want to prune 
+			- pass some inputs to the model and compute gradient
+			- Now prune the model using the funciton above 
+			- Now perform growing 
+			- for growing, we just need to keep mask 1 for weight that have highest gradients. The code should be similar to pruning op 
+	 
+"""
+
+# if args.rate_decay_method == 'cosine':
+#             readjustment_ratio = args.readjustment_ratio * global_model._decay(server_round, alpha=args.readjustment_ratio, t_end=args.rate_decay_end)
+#         else:
+#             readjustment_ratio = args.readjustment_ratio
+#
+# 			UG: This is similar to our freq argument
+#         readjust = (server_round - 1) % args.rounds_between_readjustments == 0 and readjustment_ratio > 0.
+#         if readjust:
+#             dprint('readjusting', readjustment_ratio)
+# 
+#         # determine sparsity desired at the end of this round
+#         # ...via linear interpolation
+#         if server_round <= args.rate_decay_end:
+#             round_sparsity = args.sparsity * (args.rate_decay_end - server_round) / args.rate_decay_end + args.final_sparsity * server_round / args.rate_decay_end
+#         else:
+#             round_sparsity = args.final_sparsity
+
+
+	# for name, layer in self.named_children():
+	#
+	# 	# We need to figure out how many to prune
+	# 	n_total = 0
+	# 	for bname, buf in layer.named_buffers():
+	# 		n_total += buf.numel()
+	# 	n_prune = int(n_total - weights_by_layer[name])
+	# 	if n_prune >= n_total or n_prune < 0:
+	# 		continue
+	# 	# print('prune out', n_prune)
+	#
+	# 	for pname, param in layer.named_parameters():
+	# 		if not needs_mask(pname):
+	# 			continue
+	#
+	# 		# Determine smallest indices
+	# 		_, prune_indices = torch.topk(
+	# 			torch.abs(param.data.flatten()),
+	# 			n_prune, largest=False
+	# 			)
+	#
+	# 		# Write and apply mask
+	# 		param.data.view(param.data.numel())[prune_indices] = 0
+	# 		for bname, buf in layer.named_buffers():
+	# 			if bname == pname + '_mask':
+	# 				buf.view(buf.numel())[prune_indices] = 0
+
+
+
+
