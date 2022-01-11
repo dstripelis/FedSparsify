@@ -40,10 +40,12 @@ if __name__ == "__main__":
 	output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/FashionMNIST/"
 	experiment_template = \
 		"FashionMNIST.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+	# experiment_template = \
+	# 	"FashionMNIST.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
 	rounds_num = 200
-	learners_num_list = [10]
-	participation_rates_list = [1]
+	learners_num_list = [10, 100]
+	participation_rates_list = [1, 0.1]
 	# participation_rates_list = [1, 0.5, 0.1]
 
 	# One-Shot Pruning
@@ -54,14 +56,14 @@ if __name__ == "__main__":
 	# Centralized Progressive Pruning
 	# sparsity_levels = [0.005, 0.01, 0.02]
 	# start_sparsification_at_round = [1, 25, 50]
-	start_sparsification_at_round = [0]
+	start_sparsification_at_round = [1]
 
 	# Federated Progressive Pruning
 	# sparsity_levels = [0.005, 0.01, 0.02]
 	# start_sparsification_at_round = [0, 25]
 	# sparsity_levels = [0.7, 0.8, 0.9]
-	sparsity_levels = [0.02, 0.05, 0.08]
-	sparsification_frequency = [2, 4, 8]
+	sparsity_levels = [0.01, 0.02, 0.04]
+	sparsification_frequency = [1, 2, 4]
 
 	local_epochs = 4
 	fine_tuning_epochs = [0]
@@ -70,8 +72,8 @@ if __name__ == "__main__":
 
 	for learners_num, participation_rate  in zip(learners_num_list, participation_rates_list):
 		for sparsity_level in sparsity_levels:
-			for sparsification_round in start_sparsification_at_round:
-				for frequency in sparsification_frequency:
+			for frequency in sparsification_frequency:
+				for sparsification_round in start_sparsification_at_round:
 					for fine_tuning_epoch_num in fine_tuning_epochs:
 
 						# fill in string placeholders
@@ -92,13 +94,13 @@ if __name__ == "__main__":
 						scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 
 						# Merging Ops.
-						# merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
+						merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
 						# merge_op = merge_ops.MergeMedian(scaling_factors)
 						# merge_op = merge_ops.MergeAbsMax(scaling_factors)
 						# merge_op = merge_ops.MergeAbsMin(scaling_factors, discard_zeroes=True)
 						# merge_op = merge_ops.MergeTanh(scaling_factors)
 						# merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
-						merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
+						# merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
 
 						# Purging Ops.
 						# purge_op = purge_ops.PurgeByWeightMagnitude(sparsity_level=sparsity_level)
@@ -119,6 +121,11 @@ if __name__ == "__main__":
 						# 							   sparsity=sparsity_level,
 						# 							   x=x_chunks[randint][:batch_size],
 						# 							   y=y_chunks[randint][:batch_size])
+						# randint = random.randint(0, learners_num-1)
+						# purge_op = purge_ops.PurgeGrasp(model(),
+						# 							   sparsity=sparsity_level,
+						# 							   x=x_chunks[randint][:batch_size],
+						# 							   y=y_chunks[randint][:batch_size])
 
 						federated_training = ModelTraining.FederatedTraining(merge_op=merge_op,
 																			 learners_num=learners_num,
@@ -133,8 +140,8 @@ if __name__ == "__main__":
 																			 fine_tuning_epochs=fine_tuning_epoch_num,
 																			 train_with_global_mask=train_with_global_mask,
 																			 start_training_with_global_mask_at_round=sparsification_round,
-																			 output_arrays_dir=output_arrays_dir,
-																			 precomputed_masks=None)
+																			 output_arrays_dir=output_arrays_dir)
+																			 # precomputed_masks=purge_op.precomputed_masks)
 						federated_training.execution_stats['federated_environment']['model_params'] = ModelState.count_non_zero_elems(model())
 						federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
 						federated_training.execution_stats['federated_environment']['additional_specs'] = purge_op.json()

@@ -15,7 +15,7 @@ class PurgeOps:
 		model.set_weights(masked_weights)
 
 	def purge_params(self, sparsity_level, matrices_flattened=[], matrices_shapes=[],
-					 nnz_threshold=False):
+					 nnz_threshold=False, descending_order=False):
 		matrices_sizes = [m.size for m in matrices_flattened]
 		flat_params = np.concatenate(matrices_flattened)
 		flat_params_abs = np.abs(flat_params)
@@ -23,7 +23,10 @@ class PurgeOps:
 			flat_params_abs = flat_params_abs[flat_params_abs != 0.0]
 
 		masks = []
-		flat_params_abs.sort()
+		if descending_order:
+			(-flat_params_abs).sort() # default is ascending order
+		else:
+			flat_params_abs.sort()
 		if flat_params_abs.size > 0:
 			params_threshold = flat_params_abs[int(sparsity_level * len(flat_params_abs))]
 			CustomLogger.info("Sparsity Level: {}, Threshold: {}".format(sparsity_level, params_threshold))
@@ -75,10 +78,10 @@ class PurgeByWeightMagnitude(PurgeOps):
 
 
 class PurgeByNNZWeightMagnitude(PurgeOps):
-
 	""" This class implements the progressive pruning or multiplicative pruning. At every purging step, the number of
 	parameters we purge, is proportional to the total number of NoN-Zero parameters, i.e., sparsity_level * NNZ-params
 	whereas in the previous approaches, we purge by considering all parameters - including the zero parameters. """
+
 	def __init__(self, sparsity_level, sparsify_every_k_round=1):
 		super(PurgeByNNZWeightMagnitude, self).__init__()
 		self.sparsity_level = sparsity_level
@@ -105,13 +108,14 @@ class PurgeByNNZWeightMagnitude(PurgeOps):
 
 class PurgeByNNZWeightMagnitudeRandom(PurgeOps):
 
-	def __init__(self, sparsity_level, num_params):
+	def __init__(self, sparsity_level, num_params, sparsify_every_k_round):
 		super(PurgeByNNZWeightMagnitudeRandom, self).__init__()
 		self.sparsity_level = sparsity_level
 		self.non_zero_params = num_params
 		self.permutation = np.random.permutation(np.arange(num_params))
 		self.purging_elements_num = 0
 		self._previous_round_id = -1
+		self.sparsify_every_k_round = sparsify_every_k_round
 
 	def __call__(self, purging_model, global_model=None, federation_round=None):
 		model_weights = purging_model.get_weights()
@@ -120,7 +124,7 @@ class PurgeByNNZWeightMagnitudeRandom(PurgeOps):
 		flat_params = np.concatenate(matrices_flattened)
 		matrices_sizes = [m.size for m in matrices_flattened]
 
-		if self.sparsity_level > 0.0:
+		if self.sparsity_level > 0.0 and federation_round % self.sparsify_every_k_round == 0:
 
 			# Random indices selection.
 			if self._previous_round_id != federation_round:
@@ -191,9 +195,10 @@ class PurgeByLayerNNZWeightMagnitude(PurgeOps):
 		https://arxiv.org/abs/1506.02626
 	"""
 
-	def __init__(self, sparsity_level):
+	def __init__(self, sparsity_level, sparsify_every_k_round):
 		super(PurgeByLayerNNZWeightMagnitude, self).__init__()
 		self.sparsity_level = sparsity_level
+		self.sparsify_every_k_round = sparsify_every_k_round
 		self.threshold = None
 
 	def __call__(self, purging_model, global_model=None, federation_round=None):
@@ -201,7 +206,7 @@ class PurgeByLayerNNZWeightMagnitude(PurgeOps):
 		matrices_shapes = [matrix.shape for matrix in model_weights]
 		matrices_flattened = [matrix.flatten() for matrix in model_weights]
 
-		if self.sparsity_level > 0.0:
+		if self.sparsity_level > 0.0 and federation_round % self.sparsify_every_k_round == 0:
 			masks = []
 			thresholds = []
 			for midx, (matrix_flattened, matrix_shape) in enumerate(zip(matrices_flattened, matrices_shapes)):
@@ -294,6 +299,44 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 					"delta_round_pruning": self.delta_round_pruning}
 
 
+class PurgeByNNZDeviationFromGlobal(PurgeOps):
+
+	"""
+	Preserve those weights whose distance from the community is the largest
+	"""
+
+	def __init__(self, sparsity_level):
+		super(PurgeByNNZDeviationFromGlobal, self).__init__()
+		self.sparsity_level = sparsity_level
+		self.threshold = None
+
+	def __call__(self, purging_model, global_model=None, federation_round=None):
+		matrices_shapes = [matrix.shape for matrix in purging_model.get_weights()]
+		pruning_model_matrices_flattened = [matrix.flatten() for matrix in purging_model.get_weights()]
+		global_model_matrices_flattened = [matrix.flatten() for matrix in global_model.get_weights()]
+
+		deviation_matrices_flattened = [np.subtract(np.abs(m1), np.abs(m2))
+				for m1, m2 in zip(pruning_model_matrices_flattened, global_model_matrices_flattened)]
+
+		if self.sparsity_level > 0.0:
+			masks = []
+			thresholds = []
+			for midx, (matrix_flattened, matrix_shape) in enumerate(zip(deviation_matrices_flattened, matrices_shapes)):
+				m_threshold, m_masks = self.purge_params(sparsity_level=self.sparsity_level,
+														 matrices_flattened=[matrix_flattened],
+														 matrices_shapes=[matrix_shape],
+														 nnz_threshold=True)
+				# Function self.purge_params() returns list, thus the indexing.
+				m_mask = m_masks[0]
+				masks.append(m_mask)
+				thresholds.append(m_threshold)
+			self.threshold = thresholds
+		else:
+			masks = ModelState.get_model_binary_masks(purging_model)
+
+		return masks
+
+
 class PurgeSNIP(PurgeOps):
 
 	def __init__(self, model, sparsity, x, y):
@@ -379,7 +422,7 @@ class PurgeGrasp(PurgeOps):
 			inner_grads = inner_tape.gradient(loss, model.trainable_variables)
 		hessian_grad_product = outer_tape.gradient(
 			inner_grads, model.trainable_variables, output_gradients=grads
-			)
+		)
 
 		# Grasp computes -Hg * \theta (eq 8) and remove the top scoring weights.
 		# Here we wil consider the Hg * \theta and remove the lowest scoring weights.

@@ -342,7 +342,9 @@ class ModelTraining:
 				# normal training w/ or w/o global mask - if True, we need to augment the global_model_masks collection
 				# with one global mask per local model, hence the [gmodel_binary_masks] * len(models_subset) multiplication!
 				global_model_masks = None
-				if self.train_with_global_mask is True and round_id > self.start_training_with_global_mask_at_round:
+				if self.precomputed_masks or \
+						(self.train_with_global_mask is True and
+						 round_id > self.start_training_with_global_mask_at_round):
 					global_model_masks = [gmodel_binary_masks] * len(models_subset)
 
 				# Train models.
@@ -377,9 +379,9 @@ class ModelTraining:
 				CustomLogger.info("Local models NNZ-params after purging: {}".format(non_zero_elements_after_purging))
 
 				# evaluation of local models on local training and global test set
-				local_models_train_loss, local_models_train_score, local_models_test_loss, local_models_test_score = \
-					self.evaluate_models(models_subset, x_train_chunks, y_train_chunks, x_test, y_test,
-										 models_subset_masks)
+				# local_models_train_loss, local_models_train_score, local_models_test_loss, local_models_test_score = \
+				# 	self.evaluate_models(models_subset, x_train_chunks, y_train_chunks, x_test, y_test,
+				# 						 models_subset_masks)
 
 				self.merge_op.set_scaling_factors(scaling_factors_subset)
 				global_weights = self.merge_op(models_subset, models_subset_masks, global_model=gmodel)

@@ -41,7 +41,7 @@ if __name__ == "__main__":
 	participation_rates_list = [1]
 
 	sparsity_levels = [0]
-	start_sparsification_at_round = [0]
+	start_sparsification_at_round = [1]
 
 	# One-Shot Pruning
 	# sparsity_levels = [0.0, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99]
@@ -93,6 +93,17 @@ if __name__ == "__main__":
 					# 												   total_rounds=rounds_num,
 					# 												   delta_round_pruning=1)
 					# sparsity_level = purge_op.to_json()
+					randint = random.randint(0, learners_num-1)
+					purge_op = purge_ops.PurgeSNIP(model(),
+												   sparsity=sparsity_level,
+												   x=x_chunks[randint][:batch_size],
+												   y=y_chunks[randint][:batch_size])
+					# purge_op = purge_ops.PurgeGrasp(model(),
+					# 							   sparsity=sparsity_level,
+					# 							   x=x_chunks[randint][:batch_size],
+					# 							   y=y_chunks[randint][:batch_size])
+
+
 					federated_training = ModelTraining.FederatedTraining(merge_op=merge_op,
 																		 learners_num=learners_num,
 																		 rounds_num=rounds_num,

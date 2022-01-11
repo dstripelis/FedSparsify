@@ -8,4 +8,5 @@ export CUDA_HOME=/usr/local/cuda
 
 #/data/stripeli/metiscondaenvtf2/bin/python3 /data/stripeli/projectmetis/simulatedFL/fedinit_main/cifar_main.py
 /data/stripeli/metiscondaenvtf2/bin/python3 /data/stripeli/projectmetis/simulatedFL/fedpurgemerge_main/cifar_main.py
+#/data/stripeli/metiscondaenvtf2/bin/python3 /data/stripeli/projectmetis/simulatedFL/fedpurgemerge_main/prunefl/cifar_main.py
 

@@ -1,6 +1,8 @@
+from simulatedFL.models.model import Model
+from simulatedFL.models.fashion_mnist_fc import FashionMnistModel
+from simulatedFL.utils.model_state import ModelState
 from simulatedFL.utils.model_training import ModelTraining
 from simulatedFL.utils.data_distribution import PartitioningScheme
-from simulatedFL.utils.optimizers.fed_prox import FedProx
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.regularizers import l1
 
@@ -13,50 +15,24 @@ import tensorflow as tf
 import simulatedFL.utils.model_merge as merge_ops
 import simulatedFL.utils.model_purge as purge_ops
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "3"
+os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 np.random.seed(1990)
 random.seed(1990)
 tf.random.set_seed(1990)
 
 
-import tensorflow as tf
-
-from simulatedFL.models.model import Model
-
-
-class FashionMnistModel(Model):
-
-	def __init__(self, kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, learning_rate=0.02,
-				 metrics=["accuracy"], kernel_regularizer=None, bias_regularizer=None):
-		super().__init__(kernel_initializer, learning_rate, metrics)
-		self.kernel_regularizer = kernel_regularizer
-		self.bias_regularizer = bias_regularizer
-
-	def get_model(self):
-		"""Prepare a simple dense model."""
-		Dense = tf.keras.layers.Dense
-		Flatten = tf.keras.layers.Flatten
-
-		model = tf.keras.models.Sequential()
-		model.add(Flatten(input_shape=(28, 28)))
-		model.add(Dense(128, kernel_initializer=self.kernel_initializer, activation="relu",
-						kernel_regularizer=self.kernel_regularizer, bias_regularizer=self.bias_regularizer))
-		model.add(Dense(128, kernel_initializer=self.kernel_initializer, activation="relu",
-						kernel_regularizer=self.kernel_regularizer, bias_regularizer=self.bias_regularizer))
-		model.add(Dense(10, kernel_initializer=self.kernel_initializer, activation="softmax",
-						kernel_regularizer=self.kernel_regularizer, bias_regularizer=self.bias_regularizer))
-
-		# TODO change the loss to tf.keras.losses.SparseCategoricalCrossentropy - explicit.
-		# tf.keras.optimizers.SGD
-		# FedProx
-		model.compile(
-			optimizer=tf.keras.optimizers.SGD(learning_rate=self.learning_rate),
-			loss="sparse_categorical_crossentropy", metrics=self.metrics)
-
-		return model
-
-
 if __name__ == "__main__":
+
+	gpus = tf.config.experimental.list_physical_devices("GPU")
+	if gpus:
+		try:
+			for gpu in gpus:
+				# tf.config.experimental.set_memory_growth(gpu, False)
+				tf.config.experimental.set_virtual_device_configuration(
+					gpu, [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=4096)],) # 4GBs
+		except RuntimeError as e:
+			# Visible devices must be set before GPUs have been initialized
+			print(e)
 
 	""" Model Definition. """
 	lambda1 = l1(0.0001)
@@ -73,11 +49,15 @@ if __name__ == "__main__":
 
 	output_logs_dir = os.path.dirname(__file__) + "/../logs/FashionMNIST/"
 	output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/FashionMNIST/"
-	experiment_template = "TEST.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
+
+	experiment_template = \
+		"FedAvg.NonIID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+	# experiment_template = \
+	# 	"FashionMNIST.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
 	rounds_num = 200
-	learners_num_list = [10]
-	participation_rates_list = [1]
+	learners_num_list = [10, 100]
+	participation_rates_list = [1, 0.1]
 	# participation_rates_list = [1, 0.5, 0.1]
 
 	# One-Shot Pruning
@@ -88,21 +68,24 @@ if __name__ == "__main__":
 	# Centralized Progressive Pruning
 	# sparsity_levels = [0.005, 0.01, 0.02]
 	# start_sparsification_at_round = [1, 25, 50]
-	# start_sparsification_at_round = [0]
+	start_sparsification_at_round = [1]
 
 	# Federated Progressive Pruning
-	sparsity_levels = [0.05]
-	start_sparsification_at_round = [0, 25]
+	# sparsity_levels = [0.005, 0.01, 0.02]
+	# start_sparsification_at_round = [0, 25]
 	# sparsity_levels = [0.7, 0.8, 0.9]
+	# sparsity_levels = [0.01, 0.02, 0.04]
+	sparsity_levels = [0.01, 0.02, 0.04]
+	sparsification_frequency = [1, 2, 4]
 
 	local_epochs = 4
 	fine_tuning_epochs = [0]
 	batch_size = 32
 	train_with_global_mask = True
 
-	for learners_num in learners_num_list:
-		for participation_rate in participation_rates_list:
-			for sparsity_level in sparsity_levels:
+	for learners_num, participation_rate  in zip(learners_num_list, participation_rates_list):
+		for sparsity_level in sparsity_levels:
+			for frequency in sparsification_frequency:
 				for sparsification_round in start_sparsification_at_round:
 					for fine_tuning_epoch_num in fine_tuning_epochs:
 
@@ -113,6 +96,7 @@ if __name__ == "__main__":
 																		str(local_epochs),
 																		str(sparsity_level).replace(".", ""),
 																		str(sparsification_round),
+																		str(frequency),
 																		fine_tuning_epoch_num)
 						output_arrays_dir = output_npzarrays_dir + filled_in_template
 
@@ -123,21 +107,21 @@ if __name__ == "__main__":
 						scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 
 						# Merging Ops.
-						# merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
+						merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
 						# merge_op = merge_ops.MergeMedian(scaling_factors)
 						# merge_op = merge_ops.MergeAbsMax(scaling_factors)
 						# merge_op = merge_ops.MergeAbsMin(scaling_factors, discard_zeroes=True)
 						# merge_op = merge_ops.MergeTanh(scaling_factors)
 						# merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
 						# merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
-						merge_op = merge_ops.MergeWeightedAverageNNZMajorityVoting(scaling_factors)
 
 						# Purging Ops.
 						# purge_op = purge_ops.PurgeByWeightMagnitude(sparsity_level=sparsity_level)
 						purge_op = purge_ops.PurgeByNNZWeightMagnitude(sparsity_level=sparsity_level,
-																	   sparsify_every_k_round=4)
+																	   sparsify_every_k_round=frequency)
 						# purge_op = purge_ops.PurgeByNNZWeightMagnitudeRandom(sparsity_level=sparsity_level,
-						# 													 num_params=model().count_params())
+						# 													 num_params=model().count_params(),
+						# 													 sparsify_every_k_round=frequency)
 						# purge_op = purge_ops.PurgeByLayerWeightMagnitude(sparsity_level=sparsity_level)
 						# purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level)
 						# purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=0,
@@ -148,6 +132,11 @@ if __name__ == "__main__":
 						# sparsity_level = purge_op.to_json()
 						# randint = random.randint(0, learners_num-1)
 						# purge_op = purge_ops.PurgeSNIP(model(),
+						# 							   sparsity=sparsity_level,
+						# 							   x=x_chunks[randint][:batch_size],
+						# 							   y=y_chunks[randint][:batch_size])
+						# randint = random.randint(0, learners_num-1)
+						# purge_op = purge_ops.PurgeGrasp(model(),
 						# 							   sparsity=sparsity_level,
 						# 							   x=x_chunks[randint][:batch_size],
 						# 							   y=y_chunks[randint][:batch_size])
@@ -165,11 +154,14 @@ if __name__ == "__main__":
 																			 fine_tuning_epochs=fine_tuning_epoch_num,
 																			 train_with_global_mask=train_with_global_mask,
 																			 start_training_with_global_mask_at_round=sparsification_round,
-																			 output_arrays_dir=output_arrays_dir,
-																			 precomputed_masks=None)
+																			 output_arrays_dir=output_arrays_dir)
+																			 # precomputed_masks=purge_op.precomputed_masks)
+						federated_training.execution_stats['federated_environment']['model_params'] = ModelState.count_non_zero_elems(model())
 						federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
+						federated_training.execution_stats['federated_environment']['additional_specs'] = purge_op.json()
 						federated_training.execution_stats['federated_environment']['data_distribution'] = \
 							pscheme.to_json_representation()
+						print(federated_training.execution_stats)
 						federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunks,
 																			  y_train_chunks=y_chunks, x_test=x_test,
 																			  y_test=y_test, info="Fashion-MNIST")

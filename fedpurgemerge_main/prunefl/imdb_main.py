@@ -40,8 +40,8 @@ if __name__ == "__main__":
 	experiment_template = "IMDB.PruneFL.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
 	rounds_num = 200
-	learners_num_list = [10, 100]
-	participation_rates_list = [1, 0.1]
+	learners_num_list = [10]
+	participation_rates_list = [1]
 
 	sparsity_levels = [0]
 	start_sparsification_at_round = [0]
@@ -52,7 +52,7 @@ if __name__ == "__main__":
 	train_with_global_mask = True
 
 	trainable_vars_avg_time, non_trainable_vars_avg_time = \
-		ExecutionTimeRecorder.get_average_variable_train_time(model(), x_train, y_train, batch_size, 1)
+		ExecutionTimeRecorder.get_average_variable_train_time(model(), x_train, y_train, batch_size, 5)
 	print("Trainable Parameters Average Execution Time: ", trainable_vars_avg_time)
 	print("Non-Trainable Parameters Average Execution Time: ", non_trainable_vars_avg_time)
 
@@ -78,8 +78,8 @@ if __name__ == "__main__":
 					print("Phase 1: Training the model of a random client in order to learn the initial masks.")
 					randint = random.randint(0, learners_num - 1)
 					random_model = model()
-					initial_masks_adjustment_iterations = 5
-					initial_masks_adjustment_local_epochs = 1
+					initial_masks_adjustment_iterations = 10
+					initial_masks_adjustment_local_epochs = 5
 					precomputed_masks = None
 					for i in range(initial_masks_adjustment_iterations):
 						if precomputed_masks is None:
