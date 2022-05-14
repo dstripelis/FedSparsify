@@ -296,3 +296,38 @@ class MergeTanh(MergeOps):
 			val_scaled = x_diff_mean
 
 		return val_scaled
+
+
+class MergeWeightedPseudoGradients(MergeOps):
+	def __init__(self, scaling_factors):
+		super(MergeWeightedPseudoGradients, self).__init__(scaling_factors=scaling_factors)
+
+	def __call__(self, models, models_masks=None, *args, **kwargs):
+		# num_models = len(models)
+		# majority_voting_threshold = np.floor(np.divide(num_models, 2))
+
+		global_weights = kwargs['global_model'].get_weights()
+		# A list of lists. The length of the outer list represents the number of
+		# models being aggregated and the length of each list model member represents
+		# the number of matrices considered in the model.
+		models_pseudogradients = kwargs['models_pseudogradients']
+
+		# Scale pseduogradients contribution in the federation
+		# based on each learner's scaling factor.
+		scaled_models_pseudogradients = []
+		norm_learners_scaling_factors = self.scaling_factors_normalized()
+		num_pseudogradients_per_model = len(models_pseudogradients[0])
+		for j in range(num_pseudogradients_per_model):
+			normalized_weights = [norm_learners_scaling_factors[model_idx] * pseudo_model[j]
+								  for model_idx, pseudo_model in enumerate(models_pseudogradients)]
+			normalized_weights_np = np.array(normalized_weights)
+			normed_weight = normalized_weights_np.sum(axis=0)
+			scaled_models_pseudogradients.append(normed_weight)
+
+		new_model = [np.add(w, p) for w, p in zip(global_weights, scaled_models_pseudogradients)]
+		return new_model
+
+
+
+
+

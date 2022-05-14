@@ -1,7 +1,5 @@
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from simulatedFL.models.cifar.guanqiaoding.resnet_model import ResNet
 from simulatedFL.models.cifar.cifar_cnn import CifarCNN
-# from simulatedFL.models.cifar.cifar_resnet import CifarResNet
+from simulatedFL.models.cifar.cifar_resnet_v2 import ResNetCifar10
 from simulatedFL.utils.model_training import ModelTraining
 from simulatedFL.utils.data_distribution import PartitioningScheme
 from simulatedFL.utils.model_state import ModelState
@@ -20,18 +18,20 @@ np.random.seed(1990)
 random.seed(1990)
 tf.random.set_seed(1990)
 
-if __name__ == "__main__":
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+  tf.config.experimental.set_memory_growth(gpu, True)
 
-	gpus = tf.config.experimental.list_physical_devices("GPU")
-	if gpus:
-		try:
-			for gpu in gpus:
-				# tf.config.experimental.set_memory_growth(gpu, False)
-				tf.config.experimental.set_virtual_device_configuration(
-					gpu, [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=12288)],) # 12GBs
-		except RuntimeError as e:
-			# Visible devices must be set before GPUs have been initialized
-			print(e)
+
+def data_augmentation_fn(*image_label_tuple):
+	image, label = image_label_tuple
+	image = tf.pad(image, [[4, 4],
+						   [4, 4], [0, 0]])
+	image = tf.image.random_flip_left_right(image, seed=1990)
+	image = tf.image.random_crop(image, [32, 32, 3])
+	return image, label
+
+if __name__ == "__main__":
 
 	num_classes = 10
 	if num_classes == 10:
@@ -40,13 +40,12 @@ if __name__ == "__main__":
 		input_shape = x_train.shape[1:]
 
 		"""Model Definition."""
-		# model = CifarResNet(input_tensor_shape=input_shape, depth=50, num_classes=10).get_model
-		model = CifarCNN(cifar_10=True).get_model
-		# model = ResNet(num_classes=10, num_blocks=5, learning_rate=0.01).get_model
+		model = ResNetCifar10(num_layers=56).get_model
+		# model = CifarCNN(cifar_10=True).get_model
 
-		output_logs_dir = os.path.dirname(__file__) + "/../logs/Cifar10/"
+		output_logs_dir = os.path.dirname(__file__) + "/../logs/Cifar10/test"
 		output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/Cifar10/"
-		# experiment_template = "Cifar10.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
+
 	else:
 		"""Load the data."""
 		(x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar100.load_data()
@@ -61,48 +60,38 @@ if __name__ == "__main__":
 		output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/Cifar100/"
 		# experiment_template = "Cifar100.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
-	# experiment_template = "MV.IID." + experiment_template
 	experiment_template = \
-		"Cifar10.MV.IID.Layerpruning.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+		"Cifar10.FedAvg.IID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
 
 	model().summary()
 
-	# x_train = x_train.astype('float32') / 255
-	# x_test = x_test.astype('float32') / 255
+	x_test = x_test.astype('float32') / 255
+	y_test = y_test.astype('int64')
+	x_train = x_train.astype('float32') / 255
+	y_train = y_train.astype('int64')
 
 	# normalize data
-	channel_mean = np.mean(x_train, axis=(0, 1, 2))
-	channel_std = np.std(x_train, axis=(0, 1, 2))
-	x_train = x_train.astype('float32')
-	x_test = x_test.astype('float32')
+	test_channel_mean = np.mean(x_train, axis=(0, 1, 2))
+	test_channel_std = np.std(x_train, axis=(0, 1, 2))
+	train_channel_mean = np.mean(x_train, axis=(0, 1, 2))
+	train_channel_std = np.std(x_train, axis=(0, 1, 2))
 
 	for i in range(3):
-		x_train[:, :, :, i] = (x_train[:, :, :, i] - channel_mean[i]) / channel_std[i]
-		x_test[:, :, :, i] = (x_test[:, :, :, i] - channel_mean[i]) / channel_std[i]
+		x_test[:, :, :, i] = (x_test[:, :, :, i] - test_channel_mean[i]) / test_channel_std[i]
+		x_train[:, :, :, i] = (x_train[:, :, :, i] - train_channel_mean[i]) / train_channel_std[i]
 
-	# y_train = tf.keras.utils.to_categorical(y_train, num_classes)
-	# y_test = tf.keras.utils.to_categorical(y_test, num_classes)
-
-	rounds_num = 200
+	rounds_num = 100
 	learners_num_list = [10, 100]
 	participation_rates_list = [1, 0.1]
 	# participation_rates_list = [1, 0.5, 0.1]
 
-	# One-Shot Pruning
-	# sparsity_levels = [0.0, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99]
-	# start_sparsification_at_round = [1, 5, 10]
-	# start_sparsification_at_round = [90]
-
-	# Centralized Progressive Pruning
-	# sparsity_levels = [0]
-	# sparsity_levels = [0.7, 0.8, 0.9]
 	start_sparsification_at_round = [1]
-	sparsity_levels = [0.02, 0.04]
-	sparsification_frequency = [2, 4]
+	sparsity_levels = [0.0]
+	sparsification_frequency = [0]
 
 	local_epochs = 4
 	fine_tuning_epochs = [0]
-	batch_size = 32
+	batch_size = 128
 	train_with_global_mask = True
 
 	for learners_num, participation_rate in zip(learners_num_list, participation_rates_list):
@@ -127,10 +116,19 @@ if __name__ == "__main__":
 						# x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=5)
 						scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 
+						train_datasets = [tf.data.Dataset.from_tensor_slices((x_t, y_t))
+										  for (x_t, y_t) in zip(x_chunks, y_chunks)]
+						train_datasets = [
+							dataset.map(data_augmentation_fn).shuffle(buffer_size=5000, seed=1990).batch(batch_size)
+							for dataset in train_datasets
+						]
+						x_chunks = train_datasets
+						y_chunks = [None] * len(x_chunks)
+
 						# Merging Ops.
-						# merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
+						merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
 						# merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
-						merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
+						# merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
 
 						# Purging Ops.
 						# purge_op = purge_ops.PurgeByWeightMagnitude(sparsity_level=sparsity_level)
@@ -140,8 +138,8 @@ if __name__ == "__main__":
 						# 													 num_params=model().count_params(),
 						# 													 sparsify_every_k_round=frequency)
 						# purge_op = purge_ops.PurgeByLayerWeightMagnitude(sparsity_level=sparsity_level)
-						purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level,
-																			sparsify_every_k_round=frequency)
+						# purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level,
+						# 													sparsify_every_k_round=frequency)
 						# purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=0,
 						# 												   sparsity_level_init=0.5,
 						# 												   sparsity_level_final=0.85,
@@ -166,7 +164,7 @@ if __name__ == "__main__":
 																			 learners_scaling_factors=scaling_factors,
 																			 participation_rate=participation_rate,
 																			 batch_size=batch_size,
-																			 purge_op_local=purge_op,
+																			 purge_op_local=None,
 																			 purge_op_global=None,
 																			 start_purging_at_round=sparsification_round,
 																			 fine_tuning_epochs=fine_tuning_epoch_num,
@@ -176,7 +174,7 @@ if __name__ == "__main__":
 																			 # precomputed_masks=purge_op.precomputed_masks)
 						federated_training.execution_stats['federated_environment']['model_params'] = ModelState.count_non_zero_elems(model())
 						federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
-						federated_training.execution_stats['federated_environment']['additional_specs'] = purge_op.json()
+						federated_training.execution_stats['federated_environment']['additional_specs'] = None
 						federated_training.execution_stats['federated_environment']['data_distribution'] = pscheme.to_json_representation()
 						print(federated_training.execution_stats)
 						federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunks,

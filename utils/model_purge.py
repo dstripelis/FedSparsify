@@ -46,7 +46,7 @@ class PurgeOps:
 		return params_threshold, masks
 
 	def json(self):
-		pass
+		return None
 
 
 class PurgeByWeightMagnitude(PurgeOps):
@@ -233,19 +233,19 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 		https://arxiv.org/pdf/1710.01878.pdf
 	"""
 
-	def __init__(self, start_at_iteration, sparsity_level_init, sparsity_level_final,
-				 total_iterations, delta_iteration_pruning,
+	def __init__(self, start_at_round, sparsity_level_init, sparsity_level_final,
+				 total_rounds, delta_round_pruning, exponent,
 				 centralized_model=False, federated_model=False):
 		"""
 		Semantically, `iterations` refer to the epoch-level granularity in the
 		centralized case, whereas in the federated case it refers to the federation round.
 		"""
-		assert self.centralized_model or self.federated_model
-		self.start_at_iteration = start_at_iteration
+		self.start_at_round = start_at_round
 		self.sparsity_level_init = sparsity_level_init
 		self.sparsity_level_final = sparsity_level_final
-		self.total_iterations = total_iterations
-		self.delta_round_pruning = delta_iteration_pruning
+		self.total_rounds = total_rounds
+		self.delta_round_pruning = delta_round_pruning
+		self.exponent = exponent
 		self.centralized_model = centralized_model
 		self.federated_model = federated_model
 		super(PurgeByWeightMagnitudeGradual, self).__init__()
@@ -257,24 +257,49 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 
 		""" 
 		Gradual Pruning Equation:
-			s_r = s_f + (s_i - s_f)(1 - (r-r0)/RΔr)^3, with r >= r0
+			s_t = s_f + (s_i - s_f)(1 - (t-t0)/TΔt)^3, with t >= t0
 		
 		Notation:	
-			r: current round
 			s_r: sparsity level at current round/iteration/epoch
 			s_i: initial sparsity level
 			s_f: final sparsity level
-			r0: which round to start sparsification/pruning
-			R: total number of rounds/iterations/epochs
-			Δr: sparsity/prune every Δr rounds/iterations/epochs 
+			t: current round
+			t0: which round to start sparsification/pruning
+			T: total number of rounds/iterations/epochs
+			Δt: sparsity/prune every Δt rounds/iterations/epochs
+			
+			
+		Comments:
+			increasing the exponent, e.g., 3 to 6, it sparsifies more aggressively at the start of training, 
+			which may help to reduce transmission cost. 
 		"""
-		sparsity_level_fn = lambda r, si, sf, r0, R, dr: \
-			sf + (si - sf) * np.power(1 - np.divide(r - r0, np.multiply(R, dr)), 3)
+		# --- old gradual pruning function ---
+		# sparsity_level_fn = lambda t, si, sf, t0, T, dt, exponent: \
+		# 	sf + (si - sf) * np.power(1 - np.divide(t - t0, np.multiply(T, dt)), exponent)
+		def sparsity_level_fn(t, si, sf, t0, T, f, exp):
+			# if it is not a pruning round then prune based on the previous round that
+			# "completely" divides frequency, else if it is a pruning round, then prune
+			# using the current round id.
+			if t % f != 0:
+				t = (t // f) * f
+			st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T - t0), exp)
+			return st
+
+			# if t % f == 0:
+			# 	# if it is a pruning round then prune based on t.
+			# 	# e.g., if f == 1, then prune at every round, else prune
+			# 	# based on the previous round that "completely" divides frequency
+			# 	st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T - t0), exp)
+			# else:
+			# 	t = (t // f) * f
+			# 	st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T - t0), exp)
+			# return st
 
 		sparsity_level = sparsity_level_fn(federation_round, self.sparsity_level_init, self.sparsity_level_final,
-										   self.start_at_iteration, self.total_iterations, self.delta_round_pruning)
+										   self.start_at_round, self.total_rounds, self.delta_round_pruning,
+										   self.exponent)
 
-		if federation_round >= self.start_at_iteration and sparsity_level > 0.0:
+		if federation_round >= self.start_at_round and sparsity_level > 0.0:
 			self.threshold, masks = self.purge_params(sparsity_level=sparsity_level,
 													  matrices_flattened=matrices_flattened,
 													  matrices_shapes=matrices_shapes,
@@ -284,19 +309,191 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 
 		return masks
 
-	def to_json(self):
+	def json(self):
 		if self.centralized_model:
-			return {"start_at_epoch": self.start_at_iteration,
+			return {"start_at_epoch": self.start_at_round,
 					"sparsity_level_init": self.sparsity_level_init,
 					"sparsity_level_final": self.sparsity_level_final,
-					"total_epochs": self.total_iterations,
+					"total_epochs": self.total_rounds,
 					"delta_epoch_pruning": self.delta_round_pruning}
 		if self.federated_model:
-			return {"start_at_round": self.start_at_iteration,
+			return {"start_at_round": self.start_at_round,
 					"sparsity_level_init": self.sparsity_level_init,
 					"sparsity_level_final": self.sparsity_level_final,
-					"total_rounds": self.total_iterations,
+					"total_rounds": self.total_rounds,
 					"delta_round_pruning": self.delta_round_pruning}
+
+
+class PurgeByWeightMagnitudeRandomGradual(PurgeOps):
+	"""
+	An implementation of the pruning method suggested in paper:
+		Zhu, M., & Gupta, S. (2017). To prune, or not to prune: exploring the efficacy of pruning for model compression.
+		https://arxiv.org/pdf/1710.01878.pdf
+	"""
+
+	def __init__(self, num_params, start_at_round, sparsity_level_init, sparsity_level_final,
+				 total_rounds, delta_round_pruning, exponent,
+				 centralized_model=False, federated_model=False):
+		"""
+		Semantically, `iterations` refer to the epoch-level granularity in the
+		centralized case, whereas in the federated case it refers to the federation round.
+		"""
+		self.start_at_round = start_at_round
+		self.num_params = num_params
+		self.permutation = np.random.permutation(np.arange(self.num_params))
+		self.sparsity_level_init = sparsity_level_init
+		self.sparsity_level_final = sparsity_level_final
+		self.total_rounds = total_rounds
+		self.delta_round_pruning = delta_round_pruning
+		self.exponent = exponent
+		self.centralized_model = centralized_model
+		self.federated_model = federated_model
+		super(PurgeByWeightMagnitudeRandomGradual, self).__init__()
+
+	def __call__(self, purging_model, global_model=None, federation_round=None):
+		""" 
+		Gradual Pruning Equation:
+			s_t = s_f + (s_i - s_f)(1 - (t-t0)/TΔt)^3, with t >= t0
+
+		Notation:	
+			s_r: sparsity level at current round/iteration/epoch
+			s_i: initial sparsity level
+			s_f: final sparsity level
+			t: current round
+			t0: which round to start sparsification/pruning
+			T: total number of rounds/iterations/epochs
+			Δt: sparsity/prune every Δt rounds/iterations/epochs
+
+
+		Comments:
+			increasing the exponent, e.g., 3 to 6, it sparsifies more aggressively at the start of training, 
+			which may help to reduce transmission cost. 
+		"""
+
+		# --- old gradual pruning function ---
+		# sparsity_level_fn = lambda t, si, sf, t0, T, dt, exponent: \
+		# 	sf + (si - sf) * np.power(1 - np.divide(t - t0, np.multiply(T, dt)), exponent)
+		def sparsity_level_fn(t, si, sf, t0, T, f, exp):
+			# if it is not a pruning round then prune based on the previous round that
+			# "completely" divides frequency, else if it is a pruning round, then prune
+			# using the current round id.
+			if t % f != 0:
+				t = (t // f) * f
+			st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T - t0), exp)
+			return st
+
+		# if t % f == 0:
+		# 	# if it is a pruning round then prune based on t.
+		# 	# e.g., if f == 1, then prune at every round, else prune
+		# 	# based on the previous round that "completely" divides frequency
+		# 	st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T - t0), exp)
+		# else:
+		# 	t = (t // f) * f
+		# 	st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T - t0), exp)
+		# return st
+
+		sparsity_level = sparsity_level_fn(federation_round, self.sparsity_level_init, self.sparsity_level_final,
+										   self.start_at_round, self.total_rounds, self.delta_round_pruning,
+										   self.exponent)
+
+		if federation_round >= self.start_at_round and sparsity_level > 0.0:
+			model_weights = purging_model.get_weights()
+			matrices_shapes = [matrix.shape for matrix in model_weights]
+			matrices_flattened = [matrix.flatten() for matrix in model_weights]
+			flat_params = np.concatenate(matrices_flattened)
+			matrices_sizes = [m.size for m in matrices_flattened]
+
+			# Random indices selection.
+			purging_elements_num = int(sparsity_level * self.num_params)
+			CustomLogger.info("Total Purging Elements: {}".format(purging_elements_num))
+			zeroing_indices = self.permutation[0: purging_elements_num]
+
+			flat_params[zeroing_indices] = 0.0
+			matrices_edited = []
+			start_idx = 0
+			masks = []
+			for size in matrices_sizes:
+				matrices_edited.append(flat_params[start_idx: start_idx + size])
+				start_idx += size
+			for m_flatten, shape in zip(matrices_edited, matrices_shapes):
+				mask = np.array([1 if p != 0.0 else 0 for p in m_flatten]).reshape(shape)
+				masks.append(mask)
+		else:
+			masks = ModelState.get_model_binary_masks(purging_model)
+
+		return masks
+
+	def json(self):
+		if self.centralized_model:
+			return {"start_at_epoch": self.start_at_round,
+					"sparsity_level_init": self.sparsity_level_init,
+					"sparsity_level_final": self.sparsity_level_final,
+					"total_epochs": self.total_rounds,
+					"delta_epoch_pruning": self.delta_round_pruning}
+		if self.federated_model:
+			return {"start_at_round": self.start_at_round,
+					"sparsity_level_init": self.sparsity_level_init,
+					"sparsity_level_final": self.sparsity_level_final,
+					"total_rounds": self.total_rounds,
+					"delta_round_pruning": self.delta_round_pruning}
+
+class PurgeByWeightMagnitudeStepWise(PurgeOps):
+
+	def __init__(self, start_at_round, sparsity_level_init, sparsity_level_final,
+				 total_rounds, delta_round_pruning):
+		"""
+		Semantically, `iterations` refer to the epoch-level granularity in the
+		centralized case, whereas in the federated case it refers to the federation round.
+		"""
+		self.start_at_round = start_at_round
+		self.sparsity_level_init = sparsity_level_init
+		self.sparsity_level_final = sparsity_level_final
+		self.total_rounds = total_rounds
+		self.delta_round_pruning = delta_round_pruning
+		super(PurgeByWeightMagnitudeStepWise, self).__init__()
+
+	def __call__(self, purging_model, global_model=None, federation_round=None, binary_mask=None):
+		model_weights = purging_model.get_weights()
+		matrices_shapes = [matrix.shape for matrix in model_weights]
+		matrices_flattened = [matrix.flatten() for matrix in model_weights]
+
+		if binary_mask is not None:
+			matrices_flattened = []
+
+		""" 
+		Gradual Pruning Equation:
+			s_t = s_i +[(s_f - s_i) / ceil(T/dt)] * ceil(t/dt)  with t > 0
+
+		Notation:	
+			t: current round
+			s_i: initial sparsity level			
+			s_f: final sparsity level
+			T: total number of rounds/iterations/epochs
+			dt: sparsity/prune every Δt rounds/iterations/epochs 
+		"""
+		sparsity_level_fn = lambda t, s_i, s_f, T, dt: \
+			s_i + ((s_f - s_i) / np.ceil(T / dt)) * np.ceil(t / dt)
+
+		sparsity_level = sparsity_level_fn(federation_round, self.sparsity_level_init, self.sparsity_level_final,
+										   self.total_rounds, self.delta_round_pruning)
+
+		if federation_round >= self.start_at_round and sparsity_level > 0.0:
+			self.threshold, masks = self.purge_params(sparsity_level=sparsity_level,
+													  matrices_flattened=matrices_flattened,
+													  matrices_shapes=matrices_shapes,
+													  nnz_threshold=False)
+		else:
+			masks = ModelState.get_model_binary_masks(purging_model)
+
+		return masks
+
+
+	def json(self):
+		return {"start_at_round": self.start_at_round,
+				"sparsity_level_init": self.sparsity_level_init,
+				"sparsity_level_final": self.sparsity_level_final,
+				"total_rounds": self.total_rounds,
+				"delta_round_pruning": self.delta_round_pruning}
 
 
 class PurgeByNNZDeviationFromGlobal(PurgeOps):
@@ -420,9 +617,11 @@ class PurgeGrasp(PurgeOps):
 				y_pred = model(x)
 				loss = model.compiled_loss(y, y_pred)
 			inner_grads = inner_tape.gradient(loss, model.trainable_variables)
-		hessian_grad_product = outer_tape.gradient(
-			inner_grads, model.trainable_variables, output_gradients=grads
-		)
+			# grads = [g.values if isinstance(g, tf.IndexedSlices) else g for g in grads]
+			# inner_grads = [g.values if isinstance(g, tf.IndexedSlices) else g for g in inner_grads]
+			hessian_grad_product = outer_tape.gradient(
+				inner_grads, model.trainable_variables, output_gradients=grads
+			)
 
 		# Grasp computes -Hg * \theta (eq 8) and remove the top scoring weights.
 		# Here we wil consider the Hg * \theta and remove the lowest scoring weights.

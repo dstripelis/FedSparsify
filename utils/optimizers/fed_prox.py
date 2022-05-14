@@ -10,7 +10,7 @@ from tensorflow.python.ops import state_ops
 class FedProx(Optimizer):
     """Implementation of Perturbed Gradient Descent, i.e., FedProx optimizer"""
 
-    def __init__(self, learning_rate=0.001, mu=0.001, use_locking=False, name="FedProx", **kwargs):
+    def __init__(self, learning_rate=0.001, mu=0.01, use_locking=False, name="FedProx", **kwargs):
         super().__init__(name, **kwargs)
         self._set_hyper("_lr", learning_rate)
         self._set_hyper("_mu", mu)
@@ -48,6 +48,47 @@ class FedProx(Optimizer):
         scaled_regularization_term = lr_t * mu_t * (var - vstar)
         scaled_gradient_term = lr_t * grad
         scaled_update = scaled_gradient_term + scaled_regularization_term
+        var_update = state_ops.assign_sub(var, scaled_update)
+
+        return control_flow_ops.group(*[var_update, ])
+
+    def _apply_sparse_shared(self, grad, var, indices, scatter_add):
+        lr_t = math_ops.cast(self._lr_t, var.dtype.base_dtype)
+        mu_t = math_ops.cast(self._mu_t, var.dtype.base_dtype)
+        vstar = self.get_slot(var, "vstar")
+
+        scaled_regularization_term = lr_t * mu_t * (var - vstar)
+        scaled_gradient_term = lr_t * grad
+
+        # v_diff = state_ops.assign(vstar, mu_t * (var - vstar), use_locking=self._use_locking)
+        v_diff = state_ops.assign(vstar, scaled_regularization_term, use_locking=self._use_locking)
+
+        with ops.control_dependencies([v_diff]):  # run v_diff operation before scatter_add
+            # scaled_grad = scatter_add(vstar, indices, grad)
+            scaled_update = scatter_add(vstar, indices, scaled_gradient_term)
+
+        # var_update = state_ops.assign_sub(var, lr_t * scaled_grad)
+        var_update = state_ops.assign_sub(var, scaled_update)
+
+        return control_flow_ops.group(*[var_update, ])
+
+    def _resource_apply_sparse(self, grad, var, indices, apply_state):
+        lr_t = math_ops.cast(self._lr_t, var.dtype.base_dtype)
+        mu_t = math_ops.cast(self._mu_t, var.dtype.base_dtype)
+        vstar = self.get_slot(var, "vstar")
+
+        scaled_regularization_term = lr_t * mu_t * (var - vstar)
+        scaled_gradient_term = lr_t * grad
+
+        # v_diff = state_ops.assign(vstar, mu_t * (var - vstar), use_locking=self._use_locking)
+        v_diff = state_ops.assign(vstar, scaled_regularization_term, use_locking=self._use_locking)
+
+        with ops.control_dependencies([v_diff]):  # run v_diff operation before scatter_add
+            # scaled_grad = apply_state(vstar, indices, grad)
+            # scaled_update = apply_state(vstar, indices, scaled_gradient_term)
+            scaled_update = tf.compat.v1.scatter_add(vstar, indices, scaled_gradient_term)
+
+        # var_update = state_ops.assign_sub(var, lr_t * scaled_grad)
         var_update = state_ops.assign_sub(var, scaled_update)
 
         return control_flow_ops.group(*[var_update, ])

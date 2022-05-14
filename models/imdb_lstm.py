@@ -1,5 +1,6 @@
 import tensorflow as tf
 
+from simulatedFL.utils.optimizers.fed_prox import FedProx
 from tensorflow.keras import layers, models, regularizers
 from simulatedFL.models.model import Model
 
@@ -30,5 +31,8 @@ class IMDB_LSTM(Model):
 		model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=self.learning_rate, momentum=0.0),
 					  loss="binary_crossentropy",
 					  metrics=self.metrics)
+		# model.compile(optimizer=FedProx(learning_rate=self.learning_rate, mu=0.001),
+		# 			  loss="binary_crossentropy",
+		# 			  metrics=self.metrics)
 
 		return model
