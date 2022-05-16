@@ -10,13 +10,17 @@ from tensorflow.python.ops import state_ops
 class FedProx(Optimizer):
     """Implementation of Perturbed Gradient Descent, i.e., FedProx optimizer"""
 
-    def __init__(self, learning_rate=0.001, mu=0.01, use_locking=False, name="FedProx", **kwargs):
+    def __init__(self, learning_rate, mu=0.01, use_locking=False, name="FedProx", **kwargs):
         super().__init__(name, **kwargs)
         self._set_hyper("_lr", learning_rate)
         self._set_hyper("_mu", mu)
         self._lr = learning_rate
         self._mu = mu
         self._use_locking = use_locking
+
+        self._is_learning_rate_scheduled = False
+        if isinstance(learning_rate, tf.keras.optimizers.schedules.LearningRateSchedule):
+            self._is_learning_rate_scheduled = True
 
         # Tensor versions of the constructor arguments, created in _prepare().
         self._lr_t = None
@@ -31,7 +35,10 @@ class FedProx(Optimizer):
         }
 
     def _prepare(self, var_list):
-        self._lr_t = ops.convert_to_tensor(self._lr, name="learning_rate")
+        if self._is_learning_rate_scheduled:
+            self._lr_t = ops.convert_to_tensor(self._lr(self.iterations), name="learning_rate")
+        else:
+            self._lr_t = ops.convert_to_tensor(self._lr, name="learning_rate")
         self._mu_t = ops.convert_to_tensor(self._mu, name="prox_mu")
 
     def _create_slots(self, var_list):

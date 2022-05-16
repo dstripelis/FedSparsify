@@ -13,7 +13,7 @@ import random
 import numpy as np
 import tensorflow as tf
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 np.random.seed(1990)
 random.seed(1990)
 tf.random.set_seed(1990)
@@ -43,7 +43,7 @@ if __name__ == "__main__":
 		model = ResNetCifar10(num_layers=56).get_model
 		# model = CifarCNN(cifar_10=True).get_model
 
-		output_logs_dir = os.path.dirname(__file__) + "/../logs/Cifar10/test"
+		output_logs_dir = os.path.dirname(__file__) + "/../logs/Cifar10/test/"
 		output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/Cifar10/"
 
 	else:
@@ -61,7 +61,7 @@ if __name__ == "__main__":
 		# experiment_template = "Cifar100.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
 	experiment_template = \
-		"Cifar10.FedAvg.IID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+		"Cifar10.FedSparsifyGlobal.NonIID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
 
 	model().summary()
 
@@ -86,8 +86,8 @@ if __name__ == "__main__":
 	# participation_rates_list = [1, 0.5, 0.1]
 
 	start_sparsification_at_round = [1]
-	sparsity_levels = [0.0]
-	sparsification_frequency = [0]
+	sparsity_levels = [0.95]
+	sparsification_frequency = [1]
 
 	local_epochs = 4
 	fine_tuning_epochs = [0]
@@ -112,8 +112,8 @@ if __name__ == "__main__":
 						output_arrays_dir = output_npzarrays_dir + filled_in_template
 
 						pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=learners_num)
-						x_chunks, y_chunks = pscheme.iid_partition()
-						# x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=5)
+						# x_chunks, y_chunks = pscheme.iid_partition()
+						x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=5)
 						scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 
 						train_datasets = [tf.data.Dataset.from_tensor_slices((x_t, y_t))
@@ -140,11 +140,22 @@ if __name__ == "__main__":
 						# purge_op = purge_ops.PurgeByLayerWeightMagnitude(sparsity_level=sparsity_level)
 						# purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level,
 						# 													sparsify_every_k_round=frequency)
-						# purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=0,
-						# 												   sparsity_level_init=0.5,
-						# 												   sparsity_level_final=0.85,
-						# 												   total_rounds=rounds_num,
-						# 												   delta_round_pruning=1)
+						# purge_op = purge_ops.PurgeByWeightMagnitudeRandomGradual(num_params=model().count_params(),
+						# 														 start_at_round=sparsification_round,
+						# 														 sparsity_level_init=0.0,
+						# 														 sparsity_level_final=sparsity_level,
+						# 														 total_rounds=rounds_num,
+						# 														 delta_round_pruning=frequency,
+						# 														 exponent=3,
+						# 														 federated_model=True)
+						purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=sparsification_round,
+																		   sparsity_level_init=0.0,
+																		   sparsity_level_final=sparsity_level,
+																		   total_rounds=rounds_num,
+																		   delta_round_pruning=frequency,
+																		   exponent=3,
+																		   federated_model=True)
+
 						# sparsity_level = purge_op.to_json()
 						# randint = random.randint(0, learners_num-1)
 						# purge_op = purge_ops.PurgeSNIP(model(),
@@ -165,7 +176,7 @@ if __name__ == "__main__":
 																			 participation_rate=participation_rate,
 																			 batch_size=batch_size,
 																			 purge_op_local=None,
-																			 purge_op_global=None,
+																			 purge_op_global=purge_op,
 																			 start_purging_at_round=sparsification_round,
 																			 fine_tuning_epochs=fine_tuning_epoch_num,
 																			 train_with_global_mask=train_with_global_mask,

@@ -1,9 +1,10 @@
 import tensorflow as tf
+import simulatedFL.models.model as simulatedfl_model
+
+from simulatedFL.utils.optimizers.fed_prox import FedProx
 from tensorflow.keras import layers
 from tensorflow.keras import regularizers
 from tensorflow.keras import models as keras_models
-
-import simulatedFL.models.model as simulatedfl_model
 
 
 class ResNetUnit(layers.Layer):
@@ -254,7 +255,9 @@ class ResNetCifar10(keras_models.Model, simulatedfl_model.Model):
 			schedule,
 			[0.1 / 10., 0.1, 0.1 / 10., 0.1 / 100.])
 
-		optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9)
+		optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9) # default momentum: 0.9
+		# optimizer = FedProx(learning_rate=learning_rate, mu=0.001) # default proximal term: 0.001
+
 		model.compile(optimizer=optimizer,
 					  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
 					  metrics=["accuracy"])
