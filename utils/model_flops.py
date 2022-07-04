@@ -26,9 +26,8 @@ model = FashionMnistModel().get_model()  # total flops per example: 236,348
 # model = CifarCNN(cifar_100=True).get_model()  # total flops per example: 232,551,512
 # model = IMDB_LSTM().get_model()  # total flops per example: 131,088
 
-new_weights = [w for w in model.get_weights()]
-w_shape = new_weights[0].shape
-new_weights[0] = np.zeros(w_shape)
+# new_weights = [w for w in model.get_weights()]
+new_weights = [np.zeros(w.shape) for w in model.get_weights()]
 model.set_weights(new_weights)
 for w in model.get_weights():
 	print(w)

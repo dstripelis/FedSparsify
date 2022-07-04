@@ -18,6 +18,7 @@ def gradual_exponential_pruning(exp=3):
 		T: total number of rounds/iterations/epochs
 	"""
 	def sparsity_level_fn(t, si, sf, t0, T, f, exp):
+		# st = sf + (si - sf) * np.power(1 - np.divide(f * (np.floor(t/f)) - t0, T - t0), exp)
 		if t % f == 0:
 			st = sf + (si - sf) * np.power(1 - np.divide(t - t0, T-t0), exp)
 		else:
@@ -31,14 +32,14 @@ def gradual_exponential_pruning(exp=3):
 		(0, 95, 1, 1),
 		(0, 95, 1, 2),
 		(0, 95, 1, 5),
-		(0, 95, 1, 10),
-		(0, 95, 1, 15),
-		(0, 95, 1, 20),
+		# (0, 95, 1, 10),
+		# (0, 95, 1, 15),
+		# (0, 95, 1, 20),
 	]
 
 
 	schedules = dict()
-	T = 200
+	T = 40
 	for comb in combinations:
 		initial_sparsity, final_sparsity, start_pruning_at_round, frequency = comb[0], comb[1], comb[2], comb[3]
 		sparsity_levels = []
@@ -112,7 +113,7 @@ def gradual_nnz_pruning():
 
 
 if __name__ == "__main__":
-	gradual_exponential_pruning(exp=10)
+	# gradual_exponential_pruning(exp=10)
 	# gradual_exponential_pruning(exp=6)
 	gradual_exponential_pruning(exp=3)
 	# gradual_exponential_pruning(exp=10)

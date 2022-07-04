@@ -17,16 +17,19 @@ class PurgeOps:
 	def purge_params(self, sparsity_level, matrices_flattened=[], matrices_shapes=[],
 					 nnz_threshold=False, descending_order=False):
 		matrices_sizes = [m.size for m in matrices_flattened]
-		flat_params = np.concatenate(matrices_flattened)
+		if len(matrices_flattened) > 1:
+			flat_params = np.concatenate(matrices_flattened)
+		else:
+			flat_params = matrices_flattened[0]
 		flat_params_abs = np.abs(flat_params)
 		if nnz_threshold:
 			flat_params_abs = flat_params_abs[flat_params_abs != 0.0]
 
 		masks = []
 		if descending_order:
-			(-flat_params_abs).sort() # default is ascending order
+			(-flat_params_abs).sort() # from larger to smaller
 		else:
-			flat_params_abs.sort()
+			flat_params_abs.sort() # from smaller to larger
 		if flat_params_abs.size > 0:
 			params_threshold = flat_params_abs[int(sparsity_level * len(flat_params_abs))]
 			CustomLogger.info("Sparsity Level: {}, Threshold: {}".format(sparsity_level, params_threshold))
@@ -234,7 +237,7 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 	"""
 
 	def __init__(self, start_at_round, sparsity_level_init, sparsity_level_final,
-				 total_rounds, delta_round_pruning, exponent,
+				 total_rounds, delta_round_pruning, exponent, purge_per_layer=False,
 				 centralized_model=False, federated_model=False):
 		"""
 		Semantically, `iterations` refer to the epoch-level granularity in the
@@ -246,15 +249,12 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 		self.total_rounds = total_rounds
 		self.delta_round_pruning = delta_round_pruning
 		self.exponent = exponent
+		self.purge_per_layer = purge_per_layer
 		self.centralized_model = centralized_model
 		self.federated_model = federated_model
 		super(PurgeByWeightMagnitudeGradual, self).__init__()
 
 	def __call__(self, purging_model, global_model=None, federation_round=None):
-		model_weights = purging_model.get_weights()
-		matrices_shapes = [matrix.shape for matrix in model_weights]
-		matrices_flattened = [matrix.flatten() for matrix in model_weights]
-
 		""" 
 		Gradual Pruning Equation:
 			s_t = s_f + (s_i - s_f)(1 - (t-t0)/TΔt)^3, with t >= t0
@@ -300,10 +300,39 @@ class PurgeByWeightMagnitudeGradual(PurgeOps):
 										   self.exponent)
 
 		if federation_round >= self.start_at_round and sparsity_level > 0.0:
-			self.threshold, masks = self.purge_params(sparsity_level=sparsity_level,
-													  matrices_flattened=matrices_flattened,
-													  matrices_shapes=matrices_shapes,
-													  nnz_threshold=False)
+			if self.purge_per_layer:
+				model_weights = purging_model.weights
+				all_thresholds, all_masks = [], []
+				for weight in model_weights:
+					if weight.trainable:
+						matrix_threshold, matrix_mask = self.purge_params(sparsity_level=sparsity_level,
+																		  matrices_flattened=[weight.numpy().flatten()],
+																		  matrices_shapes=[weight.shape],
+																		  nnz_threshold=False)
+						all_thresholds.append(matrix_threshold)
+						all_masks.append(matrix_mask[0])
+					else:
+						all_thresholds.append(None)
+						all_masks.append(np.ones(weight.shape))
+				self.threshold, masks = all_thresholds, all_masks
+			else:
+				model_weights = purging_model.weights
+				trainable_weights = [w for w in model_weights if w.trainable]
+				trainable_weights_flatten = [w.numpy().flatten() for w in trainable_weights]
+				trainable_weights_shapes = [w.numpy().shape for w in trainable_weights]
+				self.threshold, trainable_weights_masks = self.purge_params(sparsity_level=sparsity_level,
+																			matrices_flattened=trainable_weights_flatten,
+																			matrices_shapes=trainable_weights_shapes,
+																			nnz_threshold=False)
+				trainable_weights_masks_iter = iter(trainable_weights_masks)
+				non_trainable_weights_masks = [np.ones(w.numpy().shape) for w in model_weights if not w.trainable]
+				non_trainable_weights_masks_iter = iter(non_trainable_weights_masks)
+				masks = []
+				for w in model_weights:
+					if w.trainable:
+						masks.append(next(trainable_weights_masks_iter))
+					else:
+						masks.append(next(non_trainable_weights_masks_iter))
 		else:
 			masks = ModelState.get_model_binary_masks(purging_model)
 
@@ -331,7 +360,7 @@ class PurgeByWeightMagnitudeRandomGradual(PurgeOps):
 		https://arxiv.org/pdf/1710.01878.pdf
 	"""
 
-	def __init__(self, num_params, start_at_round, sparsity_level_init, sparsity_level_final,
+	def __init__(self, model, start_at_round, sparsity_level_init, sparsity_level_final,
 				 total_rounds, delta_round_pruning, exponent,
 				 centralized_model=False, federated_model=False):
 		"""
@@ -339,7 +368,7 @@ class PurgeByWeightMagnitudeRandomGradual(PurgeOps):
 		centralized case, whereas in the federated case it refers to the federation round.
 		"""
 		self.start_at_round = start_at_round
-		self.num_params = num_params
+		self.num_params = sum([w.numpy().size for w in model.trainable_weights])
 		self.permutation = np.random.permutation(np.arange(self.num_params))
 		self.sparsity_level_init = sparsity_level_init
 		self.sparsity_level_final = sparsity_level_final
@@ -397,27 +426,39 @@ class PurgeByWeightMagnitudeRandomGradual(PurgeOps):
 										   self.exponent)
 
 		if federation_round >= self.start_at_round and sparsity_level > 0.0:
-			model_weights = purging_model.get_weights()
-			matrices_shapes = [matrix.shape for matrix in model_weights]
-			matrices_flattened = [matrix.flatten() for matrix in model_weights]
-			flat_params = np.concatenate(matrices_flattened)
-			matrices_sizes = [m.size for m in matrices_flattened]
 
-			# Random indices selection.
+			model_weights = purging_model.weights
+			trainable_weights = [w for w in model_weights if w.trainable]
+			trainable_weights_flatten = [w.numpy().flatten() for w in trainable_weights]
+			trainable_weights_sizes = [m.size for m in trainable_weights_flatten]
+			trainable_weights_shapes = [w.numpy().shape for w in trainable_weights]
 			purging_elements_num = int(sparsity_level * self.num_params)
 			CustomLogger.info("Total Purging Elements: {}".format(purging_elements_num))
-			zeroing_indices = self.permutation[0: purging_elements_num]
+			trainable_weights_zeroing_indices = self.permutation[0: purging_elements_num]
 
-			flat_params[zeroing_indices] = 0.0
+			flat_params = np.concatenate(trainable_weights_flatten)
+			flat_params[trainable_weights_zeroing_indices] = 0.0
 			matrices_edited = []
 			start_idx = 0
-			masks = []
-			for size in matrices_sizes:
+
+			non_trainable_weights_masks = [np.ones(w.numpy().shape) for w in model_weights if not w.trainable]
+			trainable_weights_masks = []
+			for size in trainable_weights_sizes:
 				matrices_edited.append(flat_params[start_idx: start_idx + size])
 				start_idx += size
-			for m_flatten, shape in zip(matrices_edited, matrices_shapes):
+			for m_flatten, shape in zip(matrices_edited, trainable_weights_shapes):
 				mask = np.array([1 if p != 0.0 else 0 for p in m_flatten]).reshape(shape)
-				masks.append(mask)
+				trainable_weights_masks.append(mask)
+
+			non_trainable_weights_masks_iter = iter(non_trainable_weights_masks)
+			trainable_weights_masks_iter = iter(trainable_weights_masks)
+
+			masks = []
+			for w in model_weights:
+				if w.trainable:
+					masks.append(next(trainable_weights_masks_iter))
+				else:
+					masks.append(next(non_trainable_weights_masks_iter))
 		else:
 			masks = ModelState.get_model_binary_masks(purging_model)
 
@@ -436,6 +477,7 @@ class PurgeByWeightMagnitudeRandomGradual(PurgeOps):
 					"sparsity_level_final": self.sparsity_level_final,
 					"total_rounds": self.total_rounds,
 					"delta_round_pruning": self.delta_round_pruning}
+
 
 class PurgeByWeightMagnitudeStepWise(PurgeOps):
 

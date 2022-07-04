@@ -402,7 +402,7 @@ class ModelTraining:
 				else:
 					models_subset_masks = [ModelState.get_model_binary_masks(lmodel) for lmodel in models_subset]
 
-				# save local models masks
+				# # save local models and their masks
 				# for lidx, lmodel in enumerate(models_subset):
 				# 	lmodel_binary_masks = ModelState.get_model_binary_masks(lmodel)
 				# 	np.savez(self.local_model_fname_template.format(lidx, round_id), *lmodel.get_weights())
@@ -434,9 +434,10 @@ class ModelTraining:
 				global_model_num_params = ModelState.count_non_zero_elems(gmodel)
 				# find global model binary masks
 				gmodel_binary_masks = ModelState.get_model_binary_masks(gmodel)
-				# save global model and masks masks
-				# np.savez(self.global_model_fname_template.format(round_id), *gmodel.get_weights())
-				# np.savez(self.global_model_masks_fname_template.format(round_id), *gmodel_binary_masks)
+
+				# # save global model and its masks
+				np.savez(self.global_model_fname_template.format(round_id), *gmodel.get_weights())
+				np.savez(self.global_model_masks_fname_template.format(round_id), *gmodel_binary_masks)
 
 				# eval global model
 				gmodel_loss, gmodel_score = gmodel.evaluate(x_test, y_test, verbose=False)

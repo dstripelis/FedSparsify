@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from tensorflow.keras import layers, models, regularizers
 from simulatedFL.models.model import Model
-
+from simulatedFL.utils.optimizers.fed_prox import FedProx
 
 class CifarCNN(Model):
 
@@ -48,7 +48,9 @@ class CifarCNN(Model):
 		elif self.cifar_100:
 			model.add(layers.Dense(100, activation='softmax'))
 
-		model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=self.learning_rate, momentum=0.75),
+		optimizer = tf.keras.optimizers.SGD(learning_rate=self.learning_rate, momentum=0.75)
+		# optimizer = FedProx(learning_rate=self.learning_rate, mu=0.001)
+		model.compile(optimizer=optimizer,
 					  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
 					  metrics=self.metrics)
 		return model
