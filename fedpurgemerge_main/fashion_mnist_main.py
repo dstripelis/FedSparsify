@@ -15,7 +15,7 @@ import tensorflow as tf
 import simulatedFL.utils.model_merge as merge_ops
 import simulatedFL.utils.model_purge as purge_ops
 
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+os.environ['CUDA_VISIBLE_DEVICES'] = "1"
 np.random.seed(1990)
 random.seed(1990)
 tf.random.set_seed(1990)
@@ -40,14 +40,14 @@ if __name__ == "__main__":
 	x_train = (x_train.astype('float32') / 256).reshape(-1, 28, 28, 1)
 	x_test = (x_test.astype('float32') / 256).reshape(-1, 28, 28, 1)
 
-	output_logs_dir = os.path.dirname(__file__) + "/../logs/FashionMNIST/grasp_noniid/"
+	output_logs_dir = os.path.dirname(__file__) + "/../logs/FashionMNIST/test/"
 	output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/FashionMNIST/"
 	experiment_template = \
-		"FashionMNIST.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+		"FashionMNIST.FedSparsifyGlobal.NonIID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
 
 	rounds_num = 200
-	learners_num_list = [10, 100]
-	participation_rates_list = [1, 0.1]
+	learners_num_list = [10]
+	participation_rates_list = [1]
 
 	# One-Shot Pruning
 	# sparsity_levels = [0.0, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95, 0.99]
