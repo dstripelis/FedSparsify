@@ -51,6 +51,8 @@ class ProcessImagenetRawData:
 			if (j >= num_classes):
 				break
 
+		X_train = np.transpose(X_train, (0, 2, 3, 1))
+
 		print('finished loading training images')
 
 		val_annotations_map = self.__get_annotations_map()
@@ -74,6 +76,7 @@ class ProcessImagenetRawData:
 				i += 1
 			else:
 				pass
+		X_test = np.transpose(X_test, (0, 2, 3, 1))
 
 		print('finished loading test images')
 
