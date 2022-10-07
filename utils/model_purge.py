@@ -597,9 +597,10 @@ class PurgeSNIP(PurgeOps):
 			y_pred = model(x)
 			loss = model.compiled_loss(y, y_pred)
 
-		trainable_var_names = [v.name for v in model.trainable_variables]
-		grads = tape.gradient(loss, model.trainable_weights)
-		saliences = [tf.abs(grad * weight) for weight, grad in zip(model.trainable_variables, grads)]
+		prunable_variables_names = [v.name for v in model.trainable_variables if 'batch_norm' not in v.name]
+		prunable_variables = [v for v in model.trainable_variables if 'batch_norm' not in v.name]
+		grads = tape.gradient(loss, prunable_variables)
+		saliences = [tf.abs(grad * weight) for weight, grad in zip(prunable_variables, grads)]
 		saliences_flat = tf.concat([tf.reshape(s, -1) for s in saliences], 0)
 
 		k = tf.dtypes.cast(
@@ -615,11 +616,11 @@ class PurgeSNIP(PurgeOps):
 		trainable_var_masks = [np.array(tf.cast(tf.greater_equal(s, current_threshold), dtype=s.dtype))
 							   for s in saliences]
 
-		# Now need to combine masks for both trainable and non trainable parameters.
+		# Now need to combine masks for both trainable and non-trainable parameters.
 		model_masks = []
 		trainable_var_masks_iter = iter(trainable_var_masks)
 		for v in model.variables:
-			if v.name not in trainable_var_names:
+			if v.name not in prunable_variables_names:
 				model_masks.append(np.ones(v.shape))
 			else:
 				model_masks.append(next(trainable_var_masks_iter))
@@ -650,7 +651,7 @@ class PurgeGrasp(PurgeOps):
 
 		trainable_var_names = [v.name for v in model.trainable_variables]
 		# compute gradient
-		grads = tape.gradient(loss, model.trainable_weights)
+		grads = tape.gradient(loss, model.trainable_variables)
 
 		# compute hessian-gradient product
 		# see https://github.com/tensorflow/tensorflow/blob/f8ca8b7422fb4536821ee89e9d107b26aad7f542/tensorflow/python/eager/benchmarks/resnet50/hvp_test.py#L62

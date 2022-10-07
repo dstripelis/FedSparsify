@@ -44,7 +44,7 @@ class PruneFLTraining:
 				loss = model.compiled_loss(y, y_pred)
 
 			# Gradients are only computed for the trainable weights/variables.
-			grads = tape.gradient(loss, model.trainable_weights)
+			grads = tape.gradient(loss, [v for v in model.trainable_variables])
 			grads_np = []
 			for g in grads:
 				if isinstance(g, tf.IndexedSlices):
@@ -103,7 +103,7 @@ class PruneFLTraining:
 			final_model_masks = []
 			trainable_var_masks_iter = iter(masks)
 			for v in model.variables:
-				if v.trainable:
+				if v.trainable and 'batch_norm' not in v.name:
 					final_model_masks.append(next(trainable_var_masks_iter))
 				else:
 					final_model_masks.append(np.ones(v.shape))
@@ -198,7 +198,7 @@ class PruneFLTraining:
 
 		def set_initial_federation_model_state(self, gmodel, lmodels, x_train_chunks, y_train_chunks):
 
-			model_state = []
+			model_state = gmodel.get_weights()
 			if self.initialization_state == Model.InitializationStates.RANDOM:
 				# random initialization - Assign the random state to every learner
 				model_state = gmodel.get_weights()
@@ -265,6 +265,10 @@ class PruneFLTraining:
 
 
 		def train_models(self, models, epochs_num, x_train_chunks, y_train_chunks, models_masks=None):
+			batch_size = self.batch_size
+			if isinstance(x_train_chunks[0], tf.data.Dataset):
+				batch_size = None
+
 			for midx, model in enumerate(models):
 
 				callbacks = []
@@ -276,7 +280,7 @@ class PruneFLTraining:
 
 				model.fit(
 					x_train_chunks[midx], y_train_chunks[midx],
-					epochs=epochs_num, batch_size=self.batch_size, verbose=False, callbacks=callbacks
+					epochs=epochs_num, batch_size=batch_size, verbose=False, callbacks=callbacks
 				)
 			return models
 
@@ -307,7 +311,12 @@ class PruneFLTraining:
 			return models_train_loss, models_train_score, models_test_loss, models_test_score
 
 
-		def start(self, get_model_fn, x_train_chunks, y_train_chunks, x_test, y_test, info="Some Feedback"):
+		def start(self, get_model_fn,
+				  x_train_chunks_as_numpy,
+				  y_train_chunks_as_numpy,
+				  x_train_chunks_as_datasets,
+				  y_train_chunks_as_datasets,
+				  x_test, y_test, info="Some Feedback"):
 			"""Federated Training."""
 
 			lmodels = [get_model_fn() for _ in range(self.learners_num)]
@@ -317,7 +326,8 @@ class PruneFLTraining:
 			CustomLogger.info(("{}".format(info)))
 
 			federation_rounds_stats = []
-			global_weights = self.set_initial_federation_model_state(gmodel, lmodels, x_train_chunks, y_train_chunks)
+			global_weights = self.set_initial_federation_model_state(
+				gmodel, lmodels, x_train_chunks_as_datasets, y_train_chunks_as_datasets)
 			gmodel.set_weights(global_weights)
 			gmodel_binary_masks = ModelState.get_model_binary_masks(gmodel)
 			# count number of model parameters
@@ -359,8 +369,8 @@ class PruneFLTraining:
 				# randomly select local models
 				random_models_idx = self.generate_random_participating_learners()
 				models_subset = [lmodels[idx] for idx in random_models_idx]
-				x_train_chunks_subset = [x_train_chunks[idx] for idx in random_models_idx]
-				y_train_chunks_subset = [y_train_chunks[idx] for idx in random_models_idx]
+				x_train_chunks_subset = [x_train_chunks_as_datasets[idx] for idx in random_models_idx]
+				y_train_chunks_subset = [y_train_chunks_as_datasets[idx] for idx in random_models_idx]
 				scaling_factors_subset = [self.learners_scaling_factors[idx] for idx in random_models_idx]
 
 				# print number of learners
@@ -375,7 +385,8 @@ class PruneFLTraining:
 					# PruneFL logic!!!
 					if round_id % self.masks_readjustment_rounds == 0:
 						all_gradients = None
-						for lmodel, x_chunk, y_chunk in zip(models_subset, x_train_chunks, y_train_chunks):
+						for lmodel, x_chunk, y_chunk in \
+								zip(models_subset, x_train_chunks_as_numpy, y_train_chunks_as_numpy):
 							model_gradients = self.prunefl_training_context \
 								.compute_gradients(lmodel, x_chunk, y_chunk)
 							if all_gradients is None:
@@ -419,7 +430,11 @@ class PruneFLTraining:
 
 				# evaluation of local models on local training and global test set
 				local_models_train_loss, local_models_train_score, local_models_test_loss, local_models_test_score = \
-					self.evaluate_models(models_subset, x_train_chunks, y_train_chunks, x_test, y_test,
+					self.evaluate_models(models_subset,
+										 x_train_chunks_as_datasets,
+										 y_train_chunks_as_datasets,
+										 x_test,
+										 y_test,
 										 models_subset_masks)
 
 				self.merge_op.set_scaling_factors(scaling_factors_subset)

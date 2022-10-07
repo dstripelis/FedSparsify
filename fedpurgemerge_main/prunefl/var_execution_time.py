@@ -26,7 +26,7 @@ class ExecutionTimeRecorder(object):
 
 	# Function to approximate training time with each layer independently trained.
 	@classmethod
-	def get_average_variable_train_time(cls, model, x, y, batch_size, epochs_num=5):
+	def get_average_variable_train_time(cls, original_model, curated_model, x, y, batch_size, epochs_num=5):
 		"""
 		The core idea is to train one by one each layer and run K epochs. In other words,
 		freeze K-1 layers, train the remaining layer, and capture its execution time.
@@ -41,37 +41,37 @@ class ExecutionTimeRecorder(object):
 		"""
 
 		time_callback = cls.TimeHistory()
-		# Loop through each layer setting it Trainable and others as non trainable
+		# Loop through each layer setting it Trainable and others as non-trainable
 		results = []
-		for i in range(len(model.layers)):
+		for i in range(len(curated_model.layers)):
 
-			layer_name = model.layers[i].name  # storing name of layer for printing layer
+			layer_name = curated_model.layers[i].name  # storing name of layer for printing layer
 
 			# Setting all layers as non-Trainable
-			for layer in model.layers:
+			for layer in curated_model.layers:
 				layer.trainable = False
 
 			# Setting ith layers as trainable
-			model.layers[i].trainable = True
+			curated_model.layers[i].trainable = True
 
 			# Compile
-			model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['acc'])
+			curated_model.compile(optimizer='rmsprop', loss='sparse_categorical_crossentropy', metrics=['acc'])
 
 			# Fit on a small number of epochs with callback that records time for each epoch
-			model.fit(x, y, epochs=epochs_num, batch_size=batch_size, verbose=0, callbacks=[time_callback])
+			curated_model.fit(x, y, epochs=epochs_num, batch_size=batch_size, verbose=0, callbacks=[time_callback])
 
 			# Print average of the time for each layer
 			print(f"{layer_name}: Approx (avg) train time for {epochs_num} epochs = ", np.average(time_callback.times))
 
 			# Since the execution time of every parameter inside a layer is the same, we iterate
 			# over all existing variables/matrices and append the computed execution time.
-			for v in model.layers[i].variables:
+			for v in curated_model.layers[i].variables:
 				results.append(np.average(time_callback.times))
 
 		trainable_vars_times = []
 		non_trainable_vars_times = []
-		for v, t in zip(model.variables, results):
-			if v.trainable:
+		for v, t in zip(original_model.variables, results):
+			if v.trainable and 'batch_norm' not in v.name:
 				trainable_vars_times.append(t)
 			else:
 				non_trainable_vars_times.append(t)

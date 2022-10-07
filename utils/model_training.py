@@ -176,12 +176,8 @@ class ModelTraining:
 			if isinstance(x_train_chunks[0], tf.data.Dataset):
 				batch_size = None
 
-			model_state = []
-			if self.initialization_state == Model.InitializationStates.RANDOM:
-				# random initialization - Assign the random state to every learner
-				model_state = gmodel.get_weights()
-
-			elif self.initialization_state == Model.InitializationStates.BURNIN_SINGLETON:
+			model_state = gmodel.get_weights()
+			if self.initialization_state == Model.InitializationStates.BURNIN_SINGLETON:
 				# burnin initialization - 'Burn' a single learner and assign its weight
 				lmodels[0].fit(x_train_chunks[0], y_train_chunks[0],
 					epochs=self.burnin_period_epochs, batch_size=batch_size, verbose=False
@@ -242,7 +238,8 @@ class ModelTraining:
 			return random_models_idx
 
 
-		def train_models(self, models, epochs_num, x_train_chunks, y_train_chunks, global_model, models_masks=None):
+		def train_models(self, models, epochs_num, x_train_chunks, y_train_chunks, x_test, y_test, global_model,
+						 models_masks=None):
 			batch_size = self.batch_size
 			if isinstance(x_train_chunks[0], tf.data.Dataset):
 				batch_size = None
@@ -364,6 +361,8 @@ class ModelTraining:
 																				 self.local_epochs,
 																				 x_train_chunks_subset,
 																				 y_train_chunks_subset,
+																				 x_test,
+																				 y_test,
 																				 global_model=gmodel,
 																				 models_masks=global_model_masks_learners)
 
@@ -435,7 +434,7 @@ class ModelTraining:
 				# find global model binary masks
 				gmodel_binary_masks = ModelState.get_model_binary_masks(gmodel)
 
-				# # save global model and its masks
+				# save global model and its masks
 				np.savez(self.global_model_fname_template.format(round_id), *gmodel.get_weights())
 				np.savez(self.global_model_masks_fname_template.format(round_id), *gmodel_binary_masks)
 

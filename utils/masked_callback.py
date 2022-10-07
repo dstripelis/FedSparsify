@@ -53,6 +53,7 @@ class MaskedCallback(tf.keras.callbacks.Callback):
 	def on_test_batch_begin(self, batch, logs=None):
 		""" Need to apply the mask on every batch. """
 		super(MaskedCallback, self).on_test_batch_begin(batch, logs)
+		self.apply_model_masks()
 
 	def on_test_batch_end(self, batch, logs=None):
 		""" Need to apply the mask on every batch. """
