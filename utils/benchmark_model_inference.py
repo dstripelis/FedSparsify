@@ -91,7 +91,7 @@ def measure_model_size_specs(model, output_filepath, npz_filepath=None, convert_
 if __name__ == "__main__":
 
 	fashionmnist_fc, cifar10_cnn, cifar10_resnet, cifar100_vgg16, imdb_bilstm, brainage_cnn = \
-		False, False, False, True, False, False
+		False, False, False, False, False, True
 	if fashionmnist_fc:
 		model = FashionMnistModel().get_model()
 		input_spec = (tf.TensorSpec((None, 28, 28, 1), tf.float32, name="input"),)
@@ -122,8 +122,8 @@ if __name__ == "__main__":
 	# Dense Model
 	# model_size_specs = measure_model_size_specs(model, '/tmp/brainage_cnn.0percent', npz_filepath=None, input_spec=input_spec)
 	model_size_specs = measure_model_size_specs(
-		model, '/tmp/cifar100.vgg16.0percent',
-		npz_filepath="/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar100/Cifar100.VGG16.FedAvgMFL.NonIID.rounds_100.learners_10.participation_1.le_4.compression_00.sparsificationround_1.sparsifyevery_0rounds.finetuning_0/global_model_federation_round_100.npz",
+		model, '/tmp/brainage_cnn.0percent',
+		npz_filepath="/data/stripeli/projectmetis/simulatedFL/npzarrays/BrainAge/BrainAge.UniformNonIID.0compres.rounds_40.learners_8.participation_1.le_4.compression_00.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_40.npz",
 		input_spec=input_spec)
 	all_model_sizes["sparsity:0"] = model_size_specs
 	print(model_size_specs, " (nnz_params, bytes, MBs)")
@@ -134,18 +134,18 @@ if __name__ == "__main__":
 		if sparsity % 10 == 0:
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/FashionMNIST/FashionMNIST.FedSparsifyGlobal.NonIID.rounds_200.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_200.npz".format(int(sparsity/10))
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar10/Cifar10.CNN.FedSparsifyGlobal.NonIID.rounds_200.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_200.npz".format(int(sparsity/10))
-			npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar100/Cifar100.VGG16.FedSparsifyGlobal.NonIID.rounds_100.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_100.npz".format(int(sparsity/10))
+			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar100/Cifar100.VGG16.FedSparsifyGlobal.NonIID.rounds_100.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_100.npz".format(int(sparsity/10))
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar10/Cifar10.ResNet.FedSparsifyGlobal.NonIID.rounds_100.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_100.npz".format(int(sparsity/10))
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/IMDB/IMDB.FedSparsifyGlobal.IID.0{}.rounds_200.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_200.npz".format(int(sparsity/10), int(sparsity/10))
-			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/BrainAge/BrainAge.UniformNonIID.rounds_40.learners_8.participation_1.le_4.compression_09.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_40.npz"
+			npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/BrainAge/BrainAge.UniformNonIID.rounds_40.learners_8.participation_1.le_4.compression_09.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_40.npz"
 		else:
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/FashionMNIST/FashionMNIST.FedSparsifyGlobal.NonIID.rounds_200.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_200.npz".format(sparsity)
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar10/Cifar10.CNN.FedSparsifyGlobal.NonIID.rounds_200.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_200.npz".format(sparsity)
-			npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar100/Cifar100.VGG16.FedSparsifyGlobal.NonIID.rounds_100.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_100.npz".format(sparsity)
+			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar100/Cifar100.VGG16.FedSparsifyGlobal.NonIID.rounds_100.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_100.npz".format(sparsity)
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/Cifar10/Cifar10.ResNet.FedSparsifyGlobal.NonIID.rounds_100.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_100.npz".format(sparsity)
 			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/IMDB/IMDB.FedSparsifyGlobal.IID.0{}.rounds_200.learners_10.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_200.npz".format(sparsity, sparsity)
-			# npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/BrainAge/BrainAge.UniformNonIID.rounds_40.learners_8.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_40.npz".format(sparsity, sparsity)
-		model_size_specs = measure_model_size_specs(model, '/tmp/cifar100.vgg16.{}percent'.format(sparsity), npz_filepath=npz_filepath, input_spec=input_spec)
+			npz_filepath = "/data/stripeli/projectmetis/simulatedFL/npzarrays/BrainAge/BrainAge.UniformNonIID.rounds_40.learners_8.participation_1.le_4.compression_0{}.sparsificationround_1.sparsifyevery_1rounds.finetuning_0/global_model_federation_round_40.npz".format(sparsity, sparsity)
+		model_size_specs = measure_model_size_specs(model, '/tmp/brainage_cnn.{}percent'.format(sparsity), npz_filepath=npz_filepath, input_spec=input_spec)
 		all_model_sizes["sparsity:{}".format(sparsity)] = model_size_specs
 		print(model_size_specs, " (nnz_params, bytes, MBs)")
 		print("\n\n")
