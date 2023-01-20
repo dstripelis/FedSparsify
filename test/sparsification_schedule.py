@@ -32,21 +32,24 @@ def gradual_exponential_pruning(exp=3):
 		(0, 95, 1, 1),
 		(0, 95, 1, 2),
 		(0, 95, 1, 5),
-		# (0, 95, 1, 10),
-		# (0, 95, 1, 15),
-		# (0, 95, 1, 20),
+		(0, 95, 1, 10),
+		(0, 95, 1, 15),
+		(0, 95, 1, 20),
 	]
 
 
 	schedules = dict()
-	T = 40
+	T = 200
 	for comb in combinations:
 		initial_sparsity, final_sparsity, start_pruning_at_round, frequency = comb[0], comb[1], comb[2], comb[3]
 		sparsity_levels = []
 		for t in range(T):
-			sparsity_level = sparsity_level_fn(
-				t, initial_sparsity, final_sparsity, start_pruning_at_round, T, frequency, exp=exp)
-			sparsity_levels.append(sparsity_level)
+			if t >= start_pruning_at_round:
+				sparsity_level = sparsity_level_fn(
+					t, initial_sparsity, final_sparsity, start_pruning_at_round, T, frequency, exp=exp)
+				sparsity_levels.append(sparsity_level)
+			else:
+				sparsity_levels.append(0)
 		print(comb, sparsity_levels)
 		schedules[comb] = sparsity_levels
 
@@ -113,9 +116,10 @@ def gradual_nnz_pruning():
 
 
 if __name__ == "__main__":
-	# gradual_exponential_pruning(exp=10)
+	gradual_exponential_pruning(exp=12)
 	# gradual_exponential_pruning(exp=6)
 	gradual_exponential_pruning(exp=3)
+	gradual_exponential_pruning(exp=1)
 	# gradual_exponential_pruning(exp=10)
 	# gradual_step_wise_pruning()
 	# gradual_nnz_pruning()

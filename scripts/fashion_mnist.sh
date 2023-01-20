@@ -9,4 +9,3 @@ export CUDA_HOME=/usr/local/cuda
 /data/stripeli/metiscondaenvtf2/bin/python3 /data/stripeli/projectmetis/simulatedFL/fedpurgemerge_main/fashion_mnist_main.py
 #/data/stripeli/metiscondaenvtf2/bin/python3 /data/stripeli/projectmetis/simulatedFL/fedpurgemerge_main/nopruning/fashion_mnist_main.py
 #/data/stripeli/metiscondaenvtf2/bin/python3 /data/stripeli/projectmetis/simulatedFL/gridsearch/fashion_mnist_main.py
-

@@ -1,5 +1,6 @@
+import json
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 
 import numpy as np
 # np.random.seed(1990)
@@ -10,7 +11,6 @@ import random
 import tensorflow as tf
 # tf.random.set_seed(1990)
 
-import json
 from simulatedFL.models.cifar.cifar_cnn import CifarCNN
 from simulatedFL.models.cifar.cifar_vgg import CifarVGG
 from simulatedFL.utils.model_training import ModelTraining
@@ -24,11 +24,8 @@ gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
 
-
 def data_augmentation_fn(*image_label_tuple):
 	image, label = image_label_tuple
-	# image = tf.pad(image, [[4, 4],
-	# 					   [4, 4], [0, 0]])
 	padding = 4
 	image_size = 32
 	target_size = image_size + padding * 2
@@ -47,8 +44,8 @@ if __name__ == "__main__":
 		input_shape = [None] + list(x_train.shape[1:])
 
 		"""Model Definition."""
-		# model = CifarCNN(cifar_10=True).get_model
-		model = CifarVGG(input_shape, "VGG-16", True, 1e-2, num_classes=10).get_model
+		model = CifarCNN(cifar_10=True).get_model
+		# model = CifarVGG(input_shape, "VGG-16", True, 1e-2, num_classes=10).get_model
 
 		output_logs_dir = os.path.dirname(__file__) + "/../logs/Cifar10/test/"
 		output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/Cifar10/"
@@ -67,7 +64,7 @@ if __name__ == "__main__":
 		# experiment_template = "Cifar100.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.finetuning_{}"
 
 	experiment_template = \
-		"Cifar100.VGG16.SNIP.IID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+		"Cifar100.VGG.OneShotPruning.FineTuning10Rounds.NonIID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
 
 	model().summary()
 
@@ -87,14 +84,14 @@ if __name__ == "__main__":
 		x_test[:, :, :, i] = (x_test[:, :, :, i] - test_channel_mean[i]) / test_channel_std[i]
 
 	rounds_num = 100
-	learners_num_list = [1]
-	participation_rates_list = [1]
+	learners_num_list = [10, 100]
+	participation_rates_list = [1, 0.1]
 
-	start_sparsification_at_round = [1]
-	sparsity_levels = [0.5, 0.8, 0.9, 0.95, 0.9]
-	sparsification_frequency = [0]
+	sparsity_levels = [0.9, 0.95, 0.99]
+	sparsification_frequency = [1]
+	start_sparsification_at_round = [90]
 
-	local_epochs = 1
+	local_epochs = 4
 	fine_tuning_epochs = [0]
 	batch_size = 128
 	train_with_global_mask = True
@@ -117,12 +114,14 @@ if __name__ == "__main__":
 						output_arrays_dir = output_npzarrays_dir + filled_in_template
 
 						pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=learners_num)
-						x_chunks, y_chunks = pscheme.iid_partition()
-						# x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=int(num_classes/2))
+						# x_chunks, y_chunks = pscheme.iid_partition()
+						x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=int(num_classes/2))
 						scaling_factors = [y_chunk.size for y_chunk in y_chunks]
 
-						train_datasets = [tf.data.Dataset.from_tensor_slices((x_t, y_t))
-										  for (x_t, y_t) in zip(x_chunks, y_chunks)]
+						train_datasets = [
+							tf.data.Dataset.from_tensor_slices((x_t, y_t))
+							for (x_t, y_t) in zip(x_chunks, y_chunks)
+						]
 						train_datasets = [
 							dataset.map(data_augmentation_fn).shuffle(buffer_size=5000, seed=1990).batch(batch_size)
 							for dataset in train_datasets
@@ -158,13 +157,25 @@ if __name__ == "__main__":
 						# 												   total_rounds=rounds_num,
 						# 												   delta_round_pruning=frequency,
 						# 												   exponent=3,
+						# 												   purge_per_layer=False,
 						# 												   federated_model=True)
+
+						# OneShot
+						purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=sparsification_round,
+																		   sparsity_level_init=sparsity_level,
+																		   sparsity_level_final=sparsity_level,
+																		   total_rounds=rounds_num,
+																		   delta_round_pruning=frequency,
+																		   exponent=3,
+																		   purge_per_layer=False,
+																		   federated_model=True)
+
 						# sparsity_level = purge_op.to_json()
-						randint = random.randint(0, learners_num-1)
-						purge_op = purge_ops.PurgeSNIP(model(),
-													   sparsity=sparsity_level,
-													   x=x_chunks[randint][:256],
-													   y=y_chunks[randint][:256])
+						# randint = random.randint(0, learners_num-1)
+						# purge_op = purge_ops.PurgeSNIP(model(),
+						# 							   sparsity=sparsity_level,
+						# 							   x=x_chunks[randint][:256],
+						# 							   y=y_chunks[randint][:256])
 						# randint = random.randint(0, learners_num-1)
 						# purge_op = purge_ops.PurgeGrasp(model(),
 						# 							   sparsity=sparsity_level,
@@ -181,13 +192,13 @@ if __name__ == "__main__":
 																			 participation_rate=participation_rate,
 																			 batch_size=batch_size,
 																			 purge_op_local=None,
-																			 purge_op_global=None,
+																			 purge_op_global=purge_op,
 																			 start_purging_at_round=sparsification_round,
 																			 fine_tuning_epochs=fine_tuning_epoch_num,
 																			 train_with_global_mask=train_with_global_mask,
 																			 start_training_with_global_mask_at_round=sparsification_round,
-																			 output_arrays_dir=output_arrays_dir,
-																			 precomputed_masks=purge_op.precomputed_masks)
+																			 output_arrays_dir=output_arrays_dir)
+																			 # precomputed_masks=purge_op.precomputed_masks)
 						federated_training.execution_stats['federated_environment']['model_params'] = ModelState.count_non_zero_elems(model())
 						federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
 						federated_training.execution_stats['federated_environment']['additional_specs'] = purge_op.json()

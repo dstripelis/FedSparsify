@@ -246,7 +246,6 @@ class ModelTraining:
 
 			models_pseudogradients = []
 			for midx, model in enumerate(models):
-
 				pseudogradients_cback_obj = PseudoGradientsCallback(global_model=global_model)
 				current_model_callbacks = [pseudogradients_cback_obj]
 				if models_masks is not None:
@@ -281,7 +280,7 @@ class ModelTraining:
 				models_train_loss.append(model_train_loss)
 				models_train_score.append(model_train_score)
 
-				# evaluate models og test dataset
+				# evaluate models on test dataset
 				model_test_loss, model_test_score = model.evaluate(x_test, y_test, verbose=False, callbacks=callbacks)
 				models_test_loss.append(model_test_loss)
 				models_test_score.append(model_test_score)
@@ -399,7 +398,8 @@ class ModelTraining:
 											  global_model=gmodel,
 											  models_masks=fine_tuning_masks_after_local_purging)
 				else:
-					models_subset_masks = [ModelState.get_model_binary_masks(lmodel) for lmodel in models_subset]
+					# models_subset_masks = [ModelState.get_model_binary_masks(lmodel) for lmodel in models_subset]
+					models_subset_masks = None
 
 				# # save local models and their masks
 				# for lidx, lmodel in enumerate(models_subset):
