@@ -1,8 +1,8 @@
 import tensorflow as tf
 
-from simulatedFL.utils.optimizers.fed_prox import FedProx
+from utils.optimizers.fed_prox import FedProx
 from tensorflow.keras import layers, models, regularizers
-from simulatedFL.models.model import Model
+from models.model import Model
 
 
 class IMDB_LSTM(Model):

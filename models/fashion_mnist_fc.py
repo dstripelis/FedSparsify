@@ -1,7 +1,7 @@
-from simulatedFL.utils.optimizers.fed_prox import FedProx
+from utils.optimizers.fed_prox import FedProx
 import tensorflow as tf
 
-from simulatedFL.models.model import Model
+from models.model import Model
 
 
 class FashionMnistModel(Model):

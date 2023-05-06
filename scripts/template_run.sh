@@ -8,5 +8,5 @@ export PYTHONUNBUFFERED=1
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64
 export CUDA_HOME=/usr/local/cuda
 
-"${PROJECT_CONDA_ENVIRONMENT}"/python3 "${PROJECT_HOME}"/fedpurgemerge_main/imdb_main.py
-#"${PROJECT_CONDA_ENVIRONMENT}"/python3 "${PROJECT_HOME}"/fedpurgemerge_main/prunefl/imdb_main.py
+"${PROJECT_CONDA_ENVIRONMENT}"/python3 "${PROJECT_HOME}"/fedpurgemerge_main/brainage_main.py
+

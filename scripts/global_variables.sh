@@ -1,0 +1,2 @@
+export PROJECT_HOME=""
+export PROJECT_CONDA_ENVIRONMENT=""

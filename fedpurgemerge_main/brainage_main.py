@@ -1,10 +1,10 @@
-from simulatedFL.models.brainage3d_cnn import BrainAge3DCNN
-from simulatedFL.utils.model_training import ModelTraining
-from simulatedFL.utils.data_distribution import PartitioningScheme
-from simulatedFL.utils.model_state import ModelState
+from models.brainage3d_cnn import BrainAge3DCNN
+from utils.model_training import ModelTraining
+from utils.data_distribution import PartitioningScheme
+from utils.model_state import ModelState
 
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 
 import os
 import collections

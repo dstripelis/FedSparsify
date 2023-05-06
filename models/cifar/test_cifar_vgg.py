@@ -10,7 +10,7 @@ import random
 import tensorflow as tf
 # tf.random.set_seed(1990)
 
-from simulatedFL.models.cifar.cifar_vgg import CifarVGG
+from models.cifar.cifar_vgg import CifarVGG
 
 def data_augmentation_fn(*image_label_tuple):
 	image, label = image_label_tuple

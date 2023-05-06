@@ -11,14 +11,14 @@ import random
 import tensorflow as tf
 # tf.random.set_seed(1990)
 
-from simulatedFL.models.cifar.cifar_cnn import CifarCNN
-from simulatedFL.models.cifar.cifar_vgg import CifarVGG
-from simulatedFL.utils.model_training import ModelTraining
-from simulatedFL.utils.data_distribution import PartitioningScheme
-from simulatedFL.utils.model_state import ModelState
+from models.cifar.cifar_cnn import CifarCNN
+from models.cifar.cifar_vgg import CifarVGG
+from utils.model_training import ModelTraining
+from utils.data_distribution import PartitioningScheme
+from utils.model_state import ModelState
 
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 
 gpus = tf.config.experimental.list_physical_devices('GPU')
 for gpu in gpus:
