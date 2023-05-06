@@ -6,6 +6,7 @@ from utils.model_state import ModelState
 import utils.model_merge as merge_ops
 import utils.model_purge as purge_ops
 
+import argparse
 import os
 import collections
 import cloudpickle
@@ -224,6 +225,11 @@ class MRIScanGen(object):
 
 
 if __name__ == "__main__":
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument("", default=None)
+	args = parser.parse_args()
+	print(args, flush=True)
 
 	"""Model Definition."""
 	model = BrainAge3DCNN().get_model

@@ -8,6 +8,7 @@ from utils.model_state import ModelState
 import utils.model_merge as merge_ops
 import utils.model_purge as purge_ops
 
+import argparse
 import os
 import json
 import random
@@ -24,6 +25,11 @@ for gpu in gpus:
   tf.config.experimental.set_memory_growth(gpu, True)
 
 if __name__ == "__main__":
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument("", default=None)
+	args = parser.parse_args()
+	print(args, flush=True)
 
 	# gpus = tf.config.experimental.list_physical_devices("GPU")
 	# if gpus:

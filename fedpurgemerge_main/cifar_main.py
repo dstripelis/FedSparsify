@@ -1,3 +1,4 @@
+import argparse
 import json
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = "3"
@@ -36,6 +37,11 @@ def data_augmentation_fn(*image_label_tuple):
 
 
 if __name__ == "__main__":
+
+	parser = argparse.ArgumentParser()
+	parser.add_argument("", default=None)
+	args = parser.parse_args()
+	print(args, flush=True)
 
 	num_classes = 100
 	if num_classes == 10:
