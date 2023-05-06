@@ -1,7 +1,7 @@
 import numpy as np
 import tensorflow as tf
 
-from simulatedFL.utils.model_purge import PurgeOps
+from utils.model_purge import PurgeOps
 
 class MaskedCallback(tf.keras.callbacks.Callback):
 

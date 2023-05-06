@@ -1,7 +1,7 @@
 import numpy as np
 
-from simulatedFL.utils.logger import CustomLogger
-from simulatedFL.utils.model_state import ModelState
+from utils.logger import CustomLogger
+from utils.model_state import ModelState
 
 
 class PurgeOps:

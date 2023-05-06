@@ -1,18 +1,18 @@
-from simulatedFL.models.model import Model
-from simulatedFL.fedpurgemerge_main.prunefl.prunefl_training import PruneFLTraining
-from simulatedFL.fedpurgemerge_main.prunefl.var_execution_time import ExecutionTimeRecorder
-from simulatedFL.utils.data_distribution import PartitioningScheme
+from models.model import Model
+from fedpurgemerge_main.prunefl.prunefl_training import PruneFLTraining
+from fedpurgemerge_main.prunefl.var_execution_time import ExecutionTimeRecorder
+from utils.data_distribution import PartitioningScheme
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.regularizers import l1
-from simulatedFL.models.fashion_mnist_fc import FashionMnistModel
-from simulatedFL.utils.masked_callback import MaskedCallback
+from models.fashion_mnist_fc import FashionMnistModel
+from utils.masked_callback import MaskedCallback
 
 import os
 import json
 import random
 import numpy as np
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 import tensorflow as tf
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "3"

@@ -17,9 +17,9 @@ def get_flops(concrete_func):
 
 
 import tensorflow as tf
-from simulatedFL.models.fashion_mnist_fc import FashionMnistModel
-from simulatedFL.models.cifar.cifar_cnn import CifarCNN
-from simulatedFL.models.imdb_lstm import IMDB_LSTM
+from models.fashion_mnist_fc import FashionMnistModel
+from models.cifar.cifar_cnn import CifarCNN
+from models.imdb_lstm import IMDB_LSTM
 
 model = FashionMnistModel().get_model()  # total flops per example: 236,348
 # model = CifarCNN(cifar_10=True).get_model()  # total flops per example: 232,458,812

@@ -1,5 +1,5 @@
-from simulatedFL.models.model import Model
-from simulatedFL.utils.optimizers.fed_prox import FedProx
+from models.model import Model
+from utils.optimizers.fed_prox import FedProx
 from tensorflow.keras import layers
 
 import tensorflow as tf

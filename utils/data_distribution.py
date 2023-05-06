@@ -1,7 +1,7 @@
 import random
 
 import numpy as np
-from simulatedFL.utils.logger import CustomLogger
+from utils.logger import CustomLogger
 
 
 class PartitioningScheme(object):
@@ -121,11 +121,3 @@ class PartitioningScheme(object):
 				'non_iid': self.non_iid,
 				'classes_per_client': self.classes_per_client,
 				'examples_per_client': self.examples_per_client}
-
-# if __name__ == "__main__":
-# 	import tensorflow as tf
-# 	(x_train, y_train), (x_test, y_test) = tf.keras.datasets.fashion_mnist.load_data()
-# 	pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=100)
-# 	x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=5)
-# 	print(pscheme.to_json_representation())
-
