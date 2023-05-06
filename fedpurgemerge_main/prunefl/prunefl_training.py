@@ -7,12 +7,12 @@ import numpy as np
 import tensorflow as tf
 
 from collections import namedtuple
-from simulatedFL.models.model import Model
-from simulatedFL.utils.model_merge import MergeOps
-from simulatedFL.utils.model_purge import PurgeOps
-from simulatedFL.utils.masked_callback import MaskedCallback
-from simulatedFL.utils.logger import CustomLogger
-from simulatedFL.utils.model_state import ModelState
+from models.model import Model
+from utils.model_merge import MergeOps
+from utils.model_purge import PurgeOps
+from utils.masked_callback import MaskedCallback
+from utils.logger import CustomLogger
+from utils.model_state import ModelState
 
 FederationRoundMetadata = namedtuple(typename='FederationRoundMetadata', field_names=['round_id', 'processing_time',
 																					  'global_model_total_params',

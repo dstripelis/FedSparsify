@@ -1,5 +1,5 @@
-from simulatedFL.models.model import Model
-from simulatedFL.utils.data_distribution import PartitioningScheme
+from models.model import Model
+from utils.data_distribution import PartitioningScheme
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.regularizers import l1
 
@@ -9,8 +9,8 @@ import random
 import numpy as np
 import tensorflow as tf
 
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "0"
 np.random.seed(1990)

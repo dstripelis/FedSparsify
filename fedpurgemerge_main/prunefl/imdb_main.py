@@ -1,14 +1,14 @@
-from simulatedFL.models.model import Model
-from simulatedFL.fedpurgemerge_main.prunefl.prunefl_training import PruneFLTraining
-from simulatedFL.fedpurgemerge_main.prunefl.var_execution_time import ExecutionTimeRecorder
-from simulatedFL.models.imdb_lstm import IMDB_LSTM
-from simulatedFL.utils.model_training import ModelTraining
-from simulatedFL.utils.data_distribution import PartitioningScheme
-from simulatedFL.utils.masked_callback import MaskedCallback
+from models.model import Model
+from fedpurgemerge_main.prunefl.prunefl_training import PruneFLTraining
+from fedpurgemerge_main.prunefl.var_execution_time import ExecutionTimeRecorder
+from models.imdb_lstm import IMDB_LSTM
+from utils.model_training import ModelTraining
+from utils.data_distribution import PartitioningScheme
+from utils.masked_callback import MaskedCallback
 from tensorflow.keras import preprocessing
 
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 
 import os
 import json

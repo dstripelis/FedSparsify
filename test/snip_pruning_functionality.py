@@ -1,14 +1,12 @@
-from simulatedFL.utils.data_distribution import PartitioningScheme
-from simulatedFL.models.fashion_mnist_fc import FashionMnistModel
-from simulatedFL.models.cifar.guanqiaoding.resnet_model import ResNet
-from simulatedFL.utils.model_purge import PurgeOps, PurgeSNIP
+from utils.data_distribution import PartitioningScheme
+from models.fashion_mnist_fc import FashionMnistModel
+from models.cifar.guanqiaoding.resnet_model import ResNet
+from utils.model_purge import PurgeOps, PurgeSNIP
 
 import os
 import random
 import numpy as np
 import tensorflow as tf
-
-from utils.model_purge import PurgeGrasp
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
 np.random.seed(1990)
@@ -29,7 +27,7 @@ if __name__ == "__main__":
 
 	(x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
 	input_shape = x_train.shape[1:]
-	model = ResNet(num_classes=10, num_blocks=3, learning_rate=0.01).get_model()
+	model = ResNet(num_classes=10, num_blocks=10, learning_rate=0.01).get_model()
 
 	channel_mean = np.mean(x_train, axis=(0, 1, 2))
 	channel_std = np.std(x_train, axis=(0, 1, 2))
@@ -44,7 +42,7 @@ if __name__ == "__main__":
 
 	p = np.random.permutation(len(x_chunks[0]))
 	x_chunks[0], y_chunks[0] = x_chunks[0][p], y_chunks[0][p]
-	masks = PurgeGrasp(model=model, sparsity=0.8, x=x_chunks[0][:100], y=y_chunks[0][:100]).precomputed_masks
+	masks = PurgeSNIP(model=model, sparsity=0.8, x=x_chunks[0][:100], y=y_chunks[0][:100]).precomputed_masks
 
 	PurgeOps.apply_model_masks(model, masks)
 	matrices = [m.flatten() for m in model.get_weights()]

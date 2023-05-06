@@ -1,8 +1,8 @@
 import tensorflow as tf
 
 from tensorflow.keras import layers, models, regularizers
-from simulatedFL.models.model import Model
-from simulatedFL.utils.optimizers.fed_prox import FedProx
+from models.model import Model
+from utils.optimizers.fed_prox import FedProx
 
 class CifarCNN(Model):
 

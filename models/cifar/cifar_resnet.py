@@ -1,146 +1,264 @@
 import tensorflow as tf
+import models.model as simulatedfl_model
 
-from simulatedFL.models.model import Model
+from utils.optimizers.fed_prox import FedProx
+from tensorflow.keras import layers
+from tensorflow.keras import regularizers
+from tensorflow.keras import models as keras_models
 
-from tensorflow.keras.layers import Dense, Conv2D, BatchNormalization, Activation
-from tensorflow.keras.layers import AveragePooling2D, Input, Flatten
-from tensorflow.keras.regularizers import l2
 
+class ResNetUnit(layers.Layer):
+	"""A ResNet Unit contains two conv2d layers interleaved with Batch
+	Normalization and ReLU.
+	"""
 
-class CifarResNet(Model):
+	def __init__(self,
+				 depth,
+				 stride,
+				 shortcut_connection,
+				 shortcut_from_preact,
+				 weight_decay,
+				 batch_norm_momentum,
+				 batch_norm_epsilon,
+				 batch_norm_center,
+				 batch_norm_scale,
+				 name):
+		"""Constructor.
 
-	def __init__(self, input_tensor_shape, depth=20, num_stacks=3, num_classes=100,
-				 kernel_initializer=Model.InitializationStates.GLOROT_UNIFORM, learning_rate=0.001,
-				 momentum=0.9, metrics=["accuracy"]):
-		super().__init__(kernel_initializer, learning_rate, metrics)
-		self.input_tensor_shape = input_tensor_shape
-		self.depth = depth
-		self.num_classes = num_classes
-		self.num_stacks = num_stacks
-		self.momentum = momentum
-
-	@classmethod
-	def augment_2d(cls, inputs, rotation=0, horizontal_flip=False, vertical_flip=False):
-		"""Apply additive augmentation on 2D data.
-
-		# Arguments
-		  rotation: A float, the degree range for rotation (0 <= rotation < 180),
-			  e.g. 3 for random image rotation between (-3.0, 3.0).
-		  horizontal_flip: A boolean, whether to allow random horizontal flip,
-			  e.g. true for 50% possibility to flip image horizontally.
-		  vertical_flip: A boolean, whether to allow random vertical flip,
-			  e.g. true for 50% possibility to flip image vertically.
-
-		# Returns
-		  input data after augmentation, whose shape is the same as its original.
+		Args:
+		  depth: int scalar, the depth of the two conv ops in each Resnet unit.
+		  stride: int scalar, the stride of the first conv op in each Resnet unit.
+		  shortcut_connection: bool scalar, whether to add shortcut connection in
+			each Resnet unit. If False, degenerates to a 'Plain network'.
+		  shortcut_from_preact: bool scalar, whether the shortcut connection starts
+			from the preactivation or the input feature map.
+		  weight_decay: float scalar, weight for l2 regularization.
+		  batch_norm_momentum: float scalar, the moving avearge decay.
+		  batch_norm_epsilon: float scalar, small value to avoid divide by zero.
+		  batch_norm_center: bool scalar, whether to center in the batch norm.
+		  batch_norm_scale: bool scalar, whether to scale in the batch norm.
 		"""
-		if inputs.dtype != tf.float32:
-			inputs = tf.image.convert_image_dtype(inputs, dtype=tf.float32)
+		super(ResNetUnit, self).__init__(name=name)
+		self._depth = depth
+		self._stride = stride
+		self._shortcut_connection = shortcut_connection
+		self._shortcut_from_preact = shortcut_from_preact
+		self._weight_decay = weight_decay
 
-		with tf.name_scope('augmentation'):
-			shp = tf.shape(inputs)
-			batch_size, height, width = shp[0], shp[1], shp[2]
-			width = tf.cast(width, tf.float32)
-			height = tf.cast(height, tf.float32)
+		self._kernel_regularizer = regularizers.l2(weight_decay)
 
-			transforms = []
-			identity = tf.constant([1, 0, 0, 0, 1, 0, 0, 0], dtype=tf.float32)
+		self._bn1 = layers.BatchNormalization(-1,
+											  batch_norm_momentum,
+											  batch_norm_epsilon,
+											  batch_norm_center,
+											  batch_norm_scale,
+											  name='batchnorm_1')
+		self._conv1 = layers.Conv2D(depth,
+									3,
+									stride,
+									'same',
+									use_bias=False,
+									kernel_regularizer=self._kernel_regularizer,
+									name='conv1')
+		self._bn2 = layers.BatchNormalization(-1,
+											  batch_norm_momentum,
+											  batch_norm_epsilon,
+											  batch_norm_center,
+											  batch_norm_scale,
+											  name='batchnorm_2')
+		self._conv2 = layers.Conv2D(depth,
+									3,
+									1,
+									'same',
+									use_bias=False,
+									kernel_regularizer=self._kernel_regularizer,
+									name='conv2')
 
-			if rotation > 0:
-				angle_rad = rotation * 3.141592653589793 / 180.0
-				angles = tf.random.uniform([batch_size], -angle_rad, angle_rad)
-				f = tf.contrib.image.angles_to_projective_transforms(angles,
-																	 height, width)
-				transforms.append(f)
+	def call(self, inputs):
+		"""Execute the forward pass.
 
-			if horizontal_flip:
-				coin = tf.less(tf.random_uniform([batch_size], 0, 1.0), 0.5)
-				shape = [-1., 0., width, 0., 1., 0., 0., 0.]
-				flip_transform = tf.convert_to_tensor(shape, dtype=tf.float32)
-				flip = tf.tile(tf.expand_dims(flip_transform, 0), [batch_size, 1])
-				noflip = tf.tile(tf.expand_dims(identity, 0), [batch_size, 1])
-				transforms.append(tf.where(coin, flip, noflip))
+		Args:
+		  inputs: float tensor of shape [batch_size, height, width, depth], the
+			input tensor.
 
-			if vertical_flip:
-				coin = tf.less(tf.random_uniform([batch_size], 0, 1.0), 0.5)
-				shape = [1., 0., 0., 0., -1., height, 0., 0.]
-				flip_transform = tf.convert_to_tensor(shape, dtype=tf.float32)
-				flip = tf.tile(tf.expand_dims(flip_transform, 0), [batch_size, 1])
-				noflip = tf.tile(tf.expand_dims(identity, 0), [batch_size, 1])
-				transforms.append(tf.where(coin, flip, noflip))
+		Returns:
+		  outouts: float tensor of shape [batch_size, out_height, out_width,
+			out_depth], the output tensor.
+		"""
+		depth_in = inputs.shape[3]
+		depth = self._depth
+		preact = tf.nn.relu(self._bn1(inputs))
 
-		if transforms:
-			f = tf.contrib.image.compose_transforms(*transforms)
-			inputs = tf.contrib.image.transform(inputs, f, interpolation='BILINEAR')
-		return inputs
+		shortcut = preact if self._shortcut_from_preact else inputs
 
-	def resnet_layer(self, inputs, num_filters=16,
-					 kernel_size=3,
-					 strides=1,
-					 activation='relu',
-					 batch_normalization=True,
-					 conv_first=True):
+		if depth != depth_in:
+			shortcut = tf.nn.avg_pool2d(
+				shortcut, (2, 2), strides=(1, 2, 2, 1), padding='SAME')
+			shortcut = tf.pad(
+				shortcut, [[0, 0], [0, 0], [0, 0], [(depth - depth_in) // 2] * 2])
 
-		conv = Conv2D(num_filters,
-					  kernel_size=kernel_size,
-					  strides=strides,
-					  padding='same',
-					  kernel_initializer='he_normal',
-					  kernel_regularizer=l2(1e-4),
-					  bias_regularizer=l2(1e-4))
-		x = inputs
-		if conv_first:
-			x = conv(x)
-			if batch_normalization:
-				x = BatchNormalization()(x)
-			if activation is not None:
-				x = Activation(activation)(x)
-		else:
-			if batch_normalization:
-				x = BatchNormalization()(x)
-			if activation is not None:
-				x = Activation(activation)(x)
-			x = conv(x)
-		return x
+		residual = tf.nn.relu(self._bn2(self._conv1(preact)))
+		residual = self._conv2(residual)
 
+		outputs = residual + shortcut if self._shortcut_connection else residual
+
+		return outputs
+
+
+class ResNetCifar10(keras_models.Model, simulatedfl_model.Model):
+	"""ResNet for CIFAR10 dataset."""
+
+	def __init__(self,
+				 num_layers,
+				 shortcut_connection=True,
+				 weight_decay=2e-4,
+				 batch_norm_momentum=0.99,
+				 batch_norm_epsilon=1e-3,
+				 batch_norm_center=True,
+				 batch_norm_scale=True):
+		"""Constructor.
+
+		Args:
+		  num_layers: int scalar, num of layers.
+		  shortcut_connection: bool scalar, whether to add shortcut connection in
+			each Resnet unit. If False, degenerates to a 'Plain network'.
+		  weight_decay: float scalar, weight for l2 regularization.
+		  batch_norm_momentum: float scalar, the moving avearge decay.
+		  batch_norm_epsilon: float scalar, small value to avoid divide by zero.
+		  batch_norm_center: bool scalar, whether to center in the batch norm.
+		  batch_norm_scale: bool scalar, whether to scale in the batch norm.
+		"""
+		super(ResNetCifar10, self).__init__()
+		if num_layers not in (20, 32, 44, 56, 110):
+			raise ValueError('num_layers must be one of 20, 32, 44, 56 or 110.')
+
+		self._num_layers = num_layers
+		self._shortcut_connection = shortcut_connection
+		self._weight_decay = weight_decay
+		self._batch_norm_momentum = batch_norm_momentum
+		self._batch_norm_epsilon = batch_norm_epsilon
+		self._batch_norm_center = batch_norm_center
+		self._batch_norm_scale = batch_norm_scale
+
+		self._num_units = (num_layers - 2) // 6
+
+		self._kernel_regularizer = regularizers.l2(weight_decay)
+
+		self._init_conv = layers.Conv2D(
+			filters=16,
+			kernel_size=3,
+			strides=1,
+			padding='same',
+			use_bias=False,
+			kernel_regularizer=self._kernel_regularizer,
+			name='init_conv')
+
+		self._block1 = keras_models.Sequential([ResNetUnit(
+			16,
+			1,
+			shortcut_connection,
+			True if i == 0 else False,
+			weight_decay,
+			batch_norm_momentum,
+			batch_norm_epsilon,
+			batch_norm_center,
+			batch_norm_scale,
+			'res_net_unit_%d' % (i + 1)) for i in range(self._num_units)],
+			name='block1')
+		self._block2 = keras_models.Sequential([ResNetUnit(
+			32,
+			2 if i == 0 else 1,
+			shortcut_connection,
+			False if i == 0 else False,
+			weight_decay,
+			batch_norm_momentum,
+			batch_norm_epsilon,
+			batch_norm_center,
+			batch_norm_scale,
+			'res_net_unit_%d' % (i + 1)) for i in range(self._num_units)],
+			name='block2')
+		self._block3 = keras_models.Sequential([ResNetUnit(
+			64,
+			2 if i == 0 else 1,
+			shortcut_connection,
+			False if i == 0 else False,
+			weight_decay,
+			batch_norm_momentum,
+			batch_norm_epsilon,
+			batch_norm_center,
+			batch_norm_scale,
+			'res_net_unit_%d' % (i + 1)) for i in range(self._num_units)],
+			name='block3')
+
+		self._final_bn = layers.BatchNormalization(
+			-1,
+			batch_norm_momentum,
+			batch_norm_epsilon,
+			batch_norm_center,
+			batch_norm_scale,
+			name='final_batchnorm')
+		self._final_conv = layers.Conv2D(
+			10,
+			1,
+			1,
+			'same',
+			use_bias=True,
+			kernel_regularizer=self._kernel_regularizer,
+			name='final_conv')
+
+	def call(self, inputs):
+		"""Execute the forward pass.
+
+		Args:
+		  inputs: float tensor of shape [batch_size, 32, 32, 3], the preprocessed,
+			data-augmented, and batched CIFAR10 images.
+
+		Returns:
+		  logits: float tensor of shape [batch_size, 10], the unnormalized logits.
+		"""
+		net = inputs
+		net = self._init_conv(net)
+
+		net = self._block1(net)
+		net = self._block2(net)
+		net = self._block3(net)
+
+		net = self._final_bn(net)
+		net = tf.nn.relu(net)
+		net = tf.reduce_mean(net, [1, 2], keepdims=True)
+		net = self._final_conv(net)
+		logits = tf.squeeze(net, axis=[1, 2])
+
+		return logits
 
 	def get_model(self):
-		if (self.depth - 2) % 6 != 0:
-			raise ValueError('depth should be 6n+2 (eg 20, 32, 44 in [a])')
-		num_filters = 16
-		num_res_blocks = int((self.depth - 2) / 6)
+		inputs = tf.keras.layers.Input(shape=(32, 32, 3), name='input')
+		net = inputs
+		net = self._init_conv(net)
 
-		inputs = Input(shape=self.input_tensor_shape)
-		inputs = self.augment_2d(inputs)
-		x = self.resnet_layer(inputs=inputs)
-		for stack in range(self.num_stacks):
-			for res_block in range(num_res_blocks):
-				strides = 1
-				if stack > 0 and res_block == 0:
-					strides = 2
-				y = self.resnet_layer(inputs=x,
-									  num_filters=num_filters,
-									  strides=strides)
-				y = self.resnet_layer(inputs=y,
-									  num_filters=num_filters,
-									  activation=None)
-				if stack > 0 and res_block == 0:
-					x = self.resnet_layer(inputs=x,
-										  num_filters=num_filters,
-										  kernel_size=1,
-										  strides=strides,
-										  activation=None,
-										  batch_normalization=False)
-				x = tf.keras.layers.add([x, y])
-				x = Activation('relu')(x)
-			num_filters *= 2
-		x = AveragePooling2D(pool_size=8)(x)
-		y = Flatten()(x)
-		outputs = Dense(self.num_classes,
-						activation='softmax',
-						kernel_initializer='he_normal')(y)
+		net = self._block1(net)
+		net = self._block2(net)
+		net = self._block3(net)
+
+		net = self._final_bn(net)
+		net = tf.nn.relu(net)
+		net = tf.reduce_mean(net, [1, 2], keepdims=True)
+		net = self._final_conv(net)
+		outputs = tf.squeeze(net, axis=[1, 2])
+
 		model = tf.keras.Model(inputs=inputs, outputs=outputs)
-		model.compile(optimizer=tf.keras.optimizers.SGD(learning_rate=self.learning_rate, momentum=self.momentum),
+
+		# Learning rate adjustment.
+		# schedule = [500, 32000, 48000]
+		schedule = [500, 5000, 10000]
+		learning_rate = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+			schedule,
+			[0.1 / 10., 0.1, 0.1 / 10., 0.1 / 100.])
+
+		optimizer = tf.keras.optimizers.SGD(learning_rate=learning_rate, momentum=0.9) # default momentum: 0.9
+		# optimizer = FedProx(learning_rate=learning_rate, mu=0.001) # default proximal term: 0.001
+
+		model.compile(optimizer=optimizer,
 					  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True),
-					  metrics=self.metrics)
+					  metrics=["accuracy"])
 		return model

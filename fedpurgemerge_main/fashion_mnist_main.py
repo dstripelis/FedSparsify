@@ -1,8 +1,8 @@
-from simulatedFL.models.model import Model
-from simulatedFL.models.fashion_mnist_fc import FashionMnistModel
-from simulatedFL.utils.model_state import ModelState
-from simulatedFL.utils.model_training import ModelTraining
-from simulatedFL.utils.data_distribution import PartitioningScheme
+from models.model import Model
+from models.fashion_mnist_fc import FashionMnistModel
+from utils.model_state import ModelState
+from utils.model_training import ModelTraining
+from utils.data_distribution import PartitioningScheme
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.regularizers import l1
 
@@ -12,8 +12,8 @@ import random
 import numpy as np
 import tensorflow as tf
 
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 
 os.environ['CUDA_VISIBLE_DEVICES'] = "3"
 np.random.seed(1990)

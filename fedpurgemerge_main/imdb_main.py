@@ -1,12 +1,12 @@
-from simulatedFL.models.model import Model
-from simulatedFL.models.imdb_lstm import IMDB_LSTM
-from simulatedFL.utils.model_training import ModelTraining
-from simulatedFL.utils.data_distribution import PartitioningScheme
+from models.model import Model
+from models.imdb_lstm import IMDB_LSTM
+from utils.model_training import ModelTraining
+from utils.data_distribution import PartitioningScheme
 from tensorflow.keras import preprocessing
-from simulatedFL.utils.model_state import ModelState
+from utils.model_state import ModelState
 
-import simulatedFL.utils.model_merge as merge_ops
-import simulatedFL.utils.model_purge as purge_ops
+import utils.model_merge as merge_ops
+import utils.model_purge as purge_ops
 
 import os
 import json
