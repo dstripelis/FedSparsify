@@ -28,9 +28,23 @@ for gpu in gpus:
 if __name__ == "__main__":
 
 	parser = argparse.ArgumentParser()
-	parser.add_argument("", default=None)
+	parser.add_argument("--iid_distribution", default=True, help="Whether to distribute the data in an IID fashion across clients")
+	parser.add_argument("--non_iid_distribution", default=False, help="Whether to distribute the data in an Non-IID fashion across clients")
+	parser.add_argument("--non_iid_classes_per_learner", default=2, type=int, help="In the case of the Non-IID data distribution the assigned examples should belong to this total number of classes, e.g., 2, 5 per learner")
+	parser.add_argument("--federation_rounds", default=100, type=int, help="For how many rounds to train the federated experiment?")
+	parser.add_argument("--learners_num", default=100, type=int, help="How many learners to consider in the federation? 10, 100?")
+	parser.add_argument("--participation_rate", default=1, type=float, help="What is the participating rate of clients at every round, e.g., 0.1 (10%)?")
+	parser.add_argument("--local_epochs", default=4, type=int, help="For how many epochs to train the global model at each client.")
+	parser.add_argument("--fine_tuning_epochs", default=0, type=int, help="Whether to fine tune after local pruning, if so for how many epochs.")
+	parser.add_argument("--batch_size", default=128, type=int, help="Training model dataset batch size.")
+	parser.add_argument("--train_with_global_mask", default=True, help="Whether to enforce the global model binary mask during local training.")
+	parser.add_argument("--start_sparsification_at_round", default=1, type=int, help="When (at which round) to start sparsifying the network?")
+	parser.add_argument("--sparsity_level", default=0.9, type=float, help="What is the final degree of sparsification, e.g., 0.9 (90%)?")
+	parser.add_argument("--sparsification_frequency", default=1, type=int, help="How often to sparsify, every f rounds.")
+	parser.add_argument("--merging_op", default=None, help="One of: FedAvg, FedAvgNNZ, MV")
+	parser.add_argument("--purging_op", default=None, help="One of: fedsparsify-global, fedsparsify-local, random, oneshot, snip, grasp")
 	args = parser.parse_args()
-	print(args, flush=True)
+	print("Provided Model Arguments:\n", args, flush=True)
 
 	""" Model Definition. """
 	lambda1 = l1(0.0001)
@@ -49,155 +63,131 @@ if __name__ == "__main__":
 	output_logs_dir = os.path.dirname(__file__) + "/../logs/FashionMNIST/test/"
 	output_npzarrays_dir = os.path.dirname(__file__) + "/../npzarrays/FashionMNIST/"
 	experiment_template = \
-		"FashionMNIST.ExponentExploration_exp{}.NonIID.rounds_{}.learners_{}.participation_{}.le_{}.compression_{}.sparsificationround_{}.sparsifyevery_{}rounds.finetuning_{}"
+		"FashionMNIST{}.Rounds_{}.Learners_{}.Participation_{}.Epochs_{}.FinalSparsity_{}.SparsificationAtRound_{}.SparsifyEvery_{}rounds.Finetuning_{}.json"
 
-	rounds_num = 200
-	learners_num_list = [10]
-	participation_rates_list = [1]
+	# fill in string placeholders
+	filled_in_template = experiment_template.format(str(args.cifar_classes_num),
+													args.federation_rounds,
+													args.learners_num,
+													str(args.participation_rate).replace(".", ""),
+													str(args.local_epochs),
+													str(args.sparsity_level).replace(".", ""),
+													str(args.start_sparsification_at_round),
+													str(args.sparsification_frequency),
+													str(args.fine_tuning_epochs))
+	output_arrays_dir = output_npzarrays_dir + filled_in_template
 
-	# One-Shot Pruning
-	# sparsity_levels = [0.8, 0.85, 0.9, 0.95, 0.99]
-	# sparsification_frequency = [1]
-	# start_sparsification_at_round = [190]
+	pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=args.learners_num)
 
-	# Federated Progressive Pruning
-	exponents = [1, 6, 12]
-	sparsity_levels = [0.95]
-	sparsification_frequency = [1, 2]
-	start_sparsification_at_round = [1]
+	if args.iid_distribution is True:
+		x_chunks, y_chunks = pscheme.iid_partition()
+	elif args.non_iid_distribution is True:
+		x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=int(args.non_iid_classes_per_learner))
+	else:
+		raise RuntimeError("Please specify whether you want an IID or Non-IID data distribution.")
 
-	local_epochs = 4
-	fine_tuning_epochs = [0]
-	batch_size = 32
-	train_with_global_mask = True
+	scaling_factors = [y_chunk.size for y_chunk in y_chunks]
+	train_datasets = [
+		tf.data.Dataset.from_tensor_slices((x_t, y_t))
+		for (x_t, y_t) in zip(x_chunks, y_chunks)
+	]
 
-	for learners_num, participation_rate  in zip(learners_num_list, participation_rates_list):
-		for exponent in exponents:
-			for sparsity_level in sparsity_levels:
-				for frequency in sparsification_frequency:
-					for sparsification_round in start_sparsification_at_round:
-						for fine_tuning_epoch_num in fine_tuning_epochs:
+	# Merging Ops.
+	if args.merging_op == "FedAvg":
+		merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
+	elif args.merging_op == "FedAvgNNZ":
+		merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
+	elif args.merging_op == "MV":
+		merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
+	else:
+		raise RuntimeError("Need to specify the merging operation.")
 
-							# fill in string placeholders
-							filled_in_template = experiment_template.format(int(exponent),
-																			rounds_num,
-																			learners_num,
-																			str(participation_rate).replace(".", ""),
-																			str(local_epochs),
-																			str(sparsity_level).replace(".", ""),
-																			str(sparsification_round),
-																			str(frequency),
-																			fine_tuning_epoch_num)
-							output_arrays_dir = output_npzarrays_dir + filled_in_template
+	precomputed_masks = None
+	if args.purging_op == "fedsparsify-global":
+		purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=args.sparsification_round,
+														   sparsity_level_init=0.0,
+														   sparsity_level_final=args.sparsity_level,
+														   total_rounds=args.federation_rounds,
+														   delta_round_pruning=args.sparsification_frequency,
+														   exponent=3,
+														   purge_per_layer=False,
+														   federated_model=True)
+	elif args.purging_op == "fedsparsify-local":
+		purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=args.sparsification_round,
+														   sparsity_level_init=0.0,
+														   sparsity_level_final=args.sparsity_level,
+														   total_rounds=args.federation_rounds,
+														   delta_round_pruning=args.sparsification_frequency,
+														   exponent=3,
+														   purge_per_layer=False,
+														   federated_model=False)
+	elif args.purging_op == "random":
+		purge_op = purge_ops.PurgeByWeightMagnitudeRandomGradual(model=model(),
+																 start_at_round=args.sparsification_round,
+																 sparsity_level_init=0.0,
+																 sparsity_level_final=args.sparsity_level,
+																 total_rounds=args.federation_rounds,
+																 delta_round_pruning=args.sparsification_frequency,
+																 exponent=3,
+																 federated_model=True)
+	elif args.purging_op == "oneshot":
+		# OneShot
+		purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=args.sparsification_round,
+														   sparsity_level_init=args.sparsity_level,
+														   sparsity_level_final=args.sparsity_level,
+														   total_rounds=args.federation_rounds,
+														   delta_round_pruning=args.sparsification_frequency,
+														   exponent=3,
+														   purge_per_layer=False,
+														   federated_model=True)
+	elif args.purging_op == "snip":
+		randint = random.randint(0, args.learners_num-1)
+		purge_op = purge_ops.PurgeSNIP(model(),
+									   sparsity=args.sparsity_level,
+									   x=x_chunks[randint][:args.batch_size],
+									   y=y_chunks[randint][:args.batch_size])
+		precomputed_masks = purge_op.precomputed_masks
+	elif args.purging_op == "grasp":
+		randint = random.randint(0, args.learners_num-1)
+		purge_op = purge_ops.PurgeGrasp(model(),
+									   sparsity=args.sparsity_level,
+									   x=x_chunks[randint][:args.batch_size],
+									   y=y_chunks[randint][:args.batch_size])
+		precomputed_masks = purge_op.precomputed_masks
+	else:
+		raise RuntimeError("Need to specify the purging/pruning operation you want to perform.")
 
-							pscheme = PartitioningScheme(x_train=x_train, y_train=y_train, partitions_num=learners_num)
-							# x_chunks, y_chunks = pscheme.iid_partition()
-							x_chunks, y_chunks = pscheme.non_iid_partition(classes_per_partition=2)
+	x_chunks = train_datasets
+	y_chunks = [None] * len(x_chunks)
+	federated_training = ModelTraining.FederatedTraining(
+		merge_op=merge_op,
+		learners_num=args.learners_num,
+		rounds_num=args.federation_rounds,
+		local_epochs=args.local_epochs,
+		learners_scaling_factors=scaling_factors,
+		participation_rate=args.participation_rate,
+		batch_size=args.batch_size,
+		purge_op_local=None,
+		purge_op_global=purge_op,
+		start_purging_at_round=args.start_sparsification_at_round,
+		fine_tuning_epochs=args.fine_tuning_epochs,
+		train_with_global_mask=args.train_with_global_mask,
+		start_training_with_global_mask_at_round=args.start_sparsification_at_round,
+		output_arrays_dir=output_arrays_dir,
+		precomputed_masks=precomputed_masks)
+	federated_training.execution_stats['federated_environment']['model_params'] = \
+		ModelState.count_non_zero_elems(model())
+	federated_training.execution_stats['federated_environment']['sparsity_level'] = \
+		args.sparsity_level
+	federated_training.execution_stats['federated_environment']['additional_specs'] = \
+		purge_op.json()
+	federated_training.execution_stats['federated_environment']['data_distribution'] = \
+		pscheme.to_json_representation()
+	print(federated_training.execution_stats)
+	federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunks,
+														  y_train_chunks=y_chunks, x_test=x_test,
+														  y_test=y_test, info="FashionMNIST")
 
-							scaling_factors = [y_chunk.size for y_chunk in y_chunks]
-
-							# Merging Ops.
-							merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
-							# merge_op = merge_ops.MergeMedian(scaling_factors)
-							# merge_op = merge_ops.MergeAbsMax(scaling_factors)
-							# merge_op = merge_ops.MergeAbsMin(scaling_factors, discard_zeroes=True)
-							# merge_op = merge_ops.MergeTanh(scaling_factors)
-							# merge_op = merge_ops.MergeWeightedAverageNNZ(scaling_factors)
-							# merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
-							# merge_op = merge_ops.MergeWeightedPseudoGradients(scaling_factors)
-
-							# Purging Ops.
-							# purge_op = purge_ops.PurgeByWeightMagnitude(sparsity_level=sparsity_level)
-							# purge_op = purge_ops.PurgeByNNZWeightMagnitude(sparsity_level=sparsity_level,
-							# 											   sparsify_every_k_round=frequency)
-							# purge_op = purge_ops.PurgeByNNZWeightMagnitudeRandom(sparsity_level=sparsity_level,
-							# 													 num_params=model().count_params(),
-							# 													 sparsify_every_k_round=frequency)
-							# purge_op = purge_ops.PurgeByLayerWeightMagnitude(sparsity_level=sparsity_level)
-							# purge_op = purge_ops.PurgeByLayerNNZWeightMagnitude(sparsity_level=sparsity_level)
-							# purge_op = purge_ops.PurgeByWeightMagnitudeRandomGradual(model=model(),
-							# 														 start_at_round=sparsification_round,
-							# 														 sparsity_level_init=0.0,
-							# 														 sparsity_level_final=sparsity_level,
-							# 														 total_rounds=rounds_num,
-							# 														 delta_round_pruning=frequency,
-							# 														 exponent=3,
-							# 														 federated_model=True)
-							purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=sparsification_round,
-																			   sparsity_level_init=0.0,
-																			   sparsity_level_final=sparsity_level,
-																			   total_rounds=rounds_num,
-																			   delta_round_pruning=frequency,
-																			   exponent=exponent,
-																			   purge_per_layer=False,
-																			   federated_model=True)
-
-							# OneShot
-							# purge_op = purge_ops.PurgeByWeightMagnitudeGradual(start_at_round=sparsification_round,
-							# 												   sparsity_level_init=sparsity_level,
-							# 												   sparsity_level_final=sparsity_level,
-							# 												   total_rounds=rounds_num,
-							# 												   delta_round_pruning=frequency,
-							# 												   exponent=3,
-							# 												   purge_per_layer=False,
-							# 												   federated_model=True)
-
-							# Random Learner
-							# randint = random.randint(0, learners_num-1)
-							# purge_op = purge_ops.PurgeSNIP(model(),
-							# 							   sparsity=sparsity_level,
-							# 							   x=x_chunks[randint][:batch_size],
-							# 							   y=y_chunks[randint][:batch_size])
-
-							# All-Learners
-							# learners_masks = []
-							# for lidx in range(learners_num):
-							# 	learner_masks = purge_ops.PurgeSNIP(model(),
-							# 								   sparsity=sparsity_level,
-							# 								   x=x_chunks[lidx][:batch_size],
-							# 								   y=y_chunks[lidx][:batch_size])
-							# 	learners_masks.append(learner_masks.precomputed_masks)
-							# masks_sum = learners_masks[0]
-							# for model_masks in learners_masks[1:]:
-							# 	masks_sum = [np.add(m1.flatten(), m2.flatten()) for m1, m2 in zip(masks_sum, model_masks)]
-							# masks_majority_voting = []
-							# for midx, m in enumerate(masks_sum):
-							# 	binary_mask = np.array([1 if p > 0 else 0 for p in m])
-							# 	binary_mask = binary_mask.reshape(model().get_weights()[midx].shape)
-							# 	masks_majority_voting.append(binary_mask)
-
-							# Random Learner
-							# randint = random.randint(0, learners_num-1)
-							# purge_op = purge_ops.PurgeGrasp(model(),
-							# 							   sparsity=sparsity_level,
-							# 							   x=x_chunks[randint][:batch_size],
-							# 							   y=y_chunks[randint][:batch_size])
-
-							federated_training = ModelTraining.FederatedTraining(merge_op=merge_op,
-																				 learners_num=learners_num,
-																				 rounds_num=rounds_num,
-																				 local_epochs=local_epochs,
-																				 learners_scaling_factors=scaling_factors,
-																				 participation_rate=participation_rate,
-																				 batch_size=batch_size,
-																				 purge_op_local=None,
-																				 purge_op_global=purge_op,
-																				 start_purging_at_round=sparsification_round,
-																				 fine_tuning_epochs=fine_tuning_epoch_num,
-																				 train_with_global_mask=train_with_global_mask,
-																				 start_training_with_global_mask_at_round=sparsification_round,
-																				 output_arrays_dir=output_arrays_dir)
-																				 # precomputed_masks=masks_majority_voting)
-																				 # precomputed_masks=purge_op.precomputed_masks)
-							federated_training.execution_stats['federated_environment']['model_params'] = ModelState.count_non_zero_elems(model())
-							federated_training.execution_stats['federated_environment']['sparsity_level'] = sparsity_level
-							federated_training.execution_stats['federated_environment']['additional_specs'] = purge_op.json()
-							federated_training.execution_stats['federated_environment']['data_distribution'] = \
-								pscheme.to_json_representation()
-							federated_training_results = federated_training.start(get_model_fn=model, x_train_chunks=x_chunks,
-																				  y_train_chunks=y_chunks, x_test=x_test,
-																				  y_test=y_test, info="Fashion-MNIST")
-
-							execution_output_filename = output_logs_dir + filled_in_template + ".json"
-							with open(execution_output_filename, "w+", encoding='utf-8') as fout:
-								json.dump(federated_training_results, fout, ensure_ascii=False, indent=4)
+	execution_output_filename = output_logs_dir + filled_in_template
+	with open(execution_output_filename, "w+", encoding='utf-8') as fout:
+		json.dump(federated_training_results, fout, ensure_ascii=False, indent=4)
