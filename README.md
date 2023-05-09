@@ -27,31 +27,28 @@ The ```fedpurgemerge_main``` directory contains all the source code required to 
 Here, we will illustrate a prototypical example based on FashionMNIST using different pruning techniques. The same logic holds for all other domains. For other domains, such as in CIFAR, where more than one models are tested we can uncomment the model generation commands and instead of CNN simply use VGG or ResNet.  
 
 #### 3.1 FedSparsify-Global FashionMNIST
-In the ```fedpurgemerge_main/fashion_mnist_main.py``` we need to set the following variables:
+For instance, to run a federated experiments over 100 learners with 10 random learners participating at each round with each learner training for 4 epochs locally and learning a model with a final sparsification degree of 80%, we need to run the ```fedpurgemerge_main/fashion_mnist_main.py``` script as follows:
 ```
-(line 65): train_with_global_mask=True
-(line 91): merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
-(line 117): purge_op = purge_ops.PurgeByWeightMagnitudeGradual(...) # here you can set different hyperaprams for the pruning schedule
+cd fedpurgemerge_main; python3 fashion_mnist_main.py --iid_distribution=True --federation_rounds=200 --learners_num=100 --participation_rate=0.1 --local_epochs=4 --batch_size=32 --train_with_global_mask=True --start_sparsification_at_round=1 --sparsity_level=0.8 --sparsification_frequency=1 --merging_op="FedAvg" --purging_op="fedsparsify-global"
 ```
 
 #### 3.2 FedSparsify-Local FashionMNIST
-In the ```fedpurgemerge_main/fashion_mnist_main.py``` we need to set the following variables:
+Similar flags as the ones used for the above case of FedSparsify-Global, but, we need to change the value of the ```purging_op``` flag to "fedsparsify-local".
+
+#### 3.2 OneShot (with and without FineTuning) FashionMNIST
+For OneShot Pruning we can run the following command where we specify when the pruning should take place, e.g., at round 50. This command will simply prune the model at the specified pruning level and keep the sparsity at this degree for the remainder of the federated execution. For instance, if we want to prune a model at 90% soarsity at round 90 and tune the pruned model for another 10 rounds the pruned model, then we simply specify a total number of 100 federation rounds and start model pruning at round 90:
+
 ```
-(line 65): train_with_global_mask=True 
-(line 97): merge_op = merge_ops.MergeWeightedAverageMajorityVoting(scaling_factors)
-(line 117) purge_op = purge_ops.PurgeByWeightMagnitudeGradual(...) # here you can set different hyperaprams for the pruning schedule
+cd fedpurgemerge_main; python3 fashion_mnist_main.py --iid_distribution=True --federation_rounds=100 --learners_num=100 --participation_rate=0.1 --local_epochs=4 --batch_size=32 --train_with_global_mask=True --start_sparsification_at_round=90 --sparsity_level=0.8 --merging_op="FedAvg" --purging_op="oneshot"
 ```
 
 #### 3.3 SNIP/GraSP FashionMNIST
-In the ```fedpurgemerge_main/fashion_mnist_main.py``` we need to set the following variables:
+In the ```fedpurgemerge_main/fashion_mnist_main.py``` we need to set the following flags:
 ```
-(line 65): train_with_global_mask=True 
-(line 97): merge_op = merge_ops.MergeWeightedAverage(scaling_factors)
-uncomment lines 127 - 131 so that a random learner can be peaked and the purge op is set to SNIP.
-uncomment line 172, basically pass the precomputed masks so that they can be used by the federated training procedure. 
+cd fedpurgemerge_main; python3 fashion_mnist_main.py --iid_distribution=True --federation_rounds=200 --learners_num=100 --participation_rate=0.1 --local_epochs=4 --batch_size=32 --train_with_global_mask=True --sparsity_level=0.8 --merging_op="FedAvg" --purging_op="snip"
 ```
 
-Similarly, in the case of GraSP, we follow the exact same steps as for SNIP with only exception that instead of ```purge_ops.PurgeSNIP(...)``` we need to invoke ```purge_ops.PurgeGraSP(...)```.
+For GraSP we execute the same command but with ```--purging_op="grasp"```.
 
 #### 3.4 PruneFL FashionMNIST
 For PruneFL all the running scripts for all domains and models are located under ```fedpurgemerge_main/prunefl```.
